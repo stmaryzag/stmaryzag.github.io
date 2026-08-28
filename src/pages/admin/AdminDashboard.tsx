@@ -80,7 +80,7 @@ export const AdminDashboard = () => {
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
         <h2 className="text-xl font-bold text-slate-800 mb-2">لوحة تحكم الإدارة</h2>
-        <p className="text-slate-500 text-sm">مرحباً {userData.fullName}، يمكنك إدارة النظام من هنا.</p>
+        <p className="text-slate-500 text-sm">مرحباً {userData?.fullName || 'بك'}، يمكنك إدارة النظام من هنا.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

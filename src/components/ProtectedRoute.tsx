@@ -1,28 +1,33 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export const ProtectedRoute = () => {
   const { currentUser, userData, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-600 gap-3">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="font-bold text-sm">جاري التحميل...</p>
+      </div>
+    );
   }
 
   if (!currentUser) {
     return <Navigate to="/login" replace />;
   }
 
-  // If user data exists but they haven't finished first login setup
-  // isFirstLogin can be determined if they don't have a phone number or photo (based on requirements)
-  const isFirstLogin = userData && (!userData.photoUrl || !userData.ownPhone);
+  const isFirstLogin = userData && userData.role !== 'admin' && userData.isFirstLogin === true;
 
-  if (isFirstLogin && window.location.pathname !== '/setup') {
+  if (isFirstLogin && location.pathname !== '/setup') {
     return <Navigate to="/setup" replace />;
   }
 
-  if (!isFirstLogin && window.location.pathname === '/setup') {
+  if (!isFirstLogin && location.pathname === '/setup') {
     return <Navigate to="/" replace />;
   }
 
   return <Outlet />;
 };
+

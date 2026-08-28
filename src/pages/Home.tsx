@@ -2,20 +2,23 @@ import { useAuth } from '../contexts/AuthContext';
 import { DeaconDashboard } from './dashboard/DeaconDashboard';
 import { ParentDashboard } from './dashboard/ParentDashboard';
 import { AssistantDashboard } from './dashboard/AssistantDashboard';
-import { useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { AdminDashboard } from './admin/AdminDashboard';
 
 export const Home = () => {
-  const { userData } = useAuth();
-  const navigate = useNavigate();
+  const { userData, loading } = useAuth();
 
-  useEffect(() => {
-    if (userData?.role === 'admin') {
-      navigate('/admin');
-    }
-  }, [userData, navigate]);
+  if (loading) {
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center text-slate-500 gap-3">
+        <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-sm">جاري التحميل...</p>
+      </div>
+    );
+  }
 
-  if (!userData) return null;
+  if (!userData || userData.role === 'admin') {
+    return <AdminDashboard />;
+  }
 
   if (userData.role === 'deacon') {
     return <DeaconDashboard />;
@@ -29,6 +32,6 @@ export const Home = () => {
     return <AssistantDashboard />;
   }
 
-  // Admin is handled via redirect
-  return null;
+  return <AdminDashboard />;
 };
+
