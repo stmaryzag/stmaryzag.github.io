@@ -1,16 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { User, Phone, Shield, Lock, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { User, Phone, Shield, Lock, CheckCircle, AlertCircle, RefreshCw, Camera, Upload } from 'lucide-react';
 import { updatePassword } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { compressImage } from '../utils/image';
 
 export const Profile = () => {
   const { currentUser, userData, reloadUserData } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [newPassword, setNewPassword] = useState('');
   const [phone, setPhone] = useState(userData?.ownPhone || '');
+  const [photoBase64, setPhotoBase64] = useState(userData?.photoUrl || '');
   const [loading, setLoading] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setMsg(null);
+    setCompressing(true);
+
+    try {
+      const compressed = await compressImage(file, 280, 280, 0.75);
+      setPhotoBase64(compressed);
+    } catch (err: any) {
+      console.error('Image compression error:', err);
+      setMsg({ type: 'error', text: err.message || 'تعذر معالجة الصورة المختارة' });
+    } finally {
+      setCompressing(false);
+    }
+  };
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,10 +50,22 @@ export const Profile = () => {
         }
       }
 
-      if (userData?.id) {
-        await updateDoc(doc(db, 'users', userData.id), {
-          ownPhone: phone
-        });
+      if (currentUser?.uid) {
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          ownPhone: phone.trim(),
+          photoUrl: photoBase64
+        }, { merge: true });
+      }
+
+      if (userData?.id && userData.id !== currentUser?.uid) {
+        try {
+          await setDoc(doc(db, 'users', userData.id), {
+            ownPhone: phone.trim(),
+            photoUrl: photoBase64
+          }, { merge: true });
+        } catch (e) {
+          console.warn('Sync warning:', e);
+        }
       }
 
       await reloadUserData();
@@ -45,14 +80,19 @@ export const Profile = () => {
   };
 
   const promoteToAdmin = async () => {
-    if (!userData?.id) return;
+    if (!currentUser?.uid) return;
     setLoading(true);
     try {
-      await updateDoc(doc(db, 'users', userData.id), {
+      await setDoc(doc(db, 'users', currentUser.uid), {
         role: 'admin'
-      });
+      }, { merge: true });
+      if (userData?.id && userData.id !== currentUser.uid) {
+        await setDoc(doc(db, 'users', userData.id), {
+          role: 'admin'
+        }, { merge: true });
+      }
       await reloadUserData();
-      setMsg({ type: 'success', text: 'تم ترقية الحساب إلى مدير (Admin) بنجاح!' });
+      setMsg({ type: 'success', text: 'تم ترقية الحساب إلى مسؤول (Admin) بنجاح!' });
     } catch (err: any) {
       console.error(err);
       setMsg({ type: 'error', text: 'تعذر الترقية: ' + err.message });
@@ -73,13 +113,43 @@ export const Profile = () => {
   return (
     <div className="max-w-xl mx-auto space-y-6">
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 text-center">
-        <div className="w-20 h-20 mx-auto rounded-full bg-slate-100 flex items-center justify-center border-2 border-blue-500 overflow-hidden mb-3">
-          {userData?.photoUrl ? (
-            <img src={userData.photoUrl} alt="profile" className="w-full h-full object-cover" />
+        <div 
+          onClick={() => fileInputRef.current?.click()}
+          className="w-24 h-24 mx-auto rounded-full bg-slate-100 flex items-center justify-center border-2 border-blue-500 overflow-hidden mb-3 relative group cursor-pointer"
+        >
+          {compressing ? (
+            <RefreshCw className="w-8 h-8 text-blue-600 animate-spin" />
+          ) : photoBase64 ? (
+            <>
+              <img src={photoBase64} alt="profile" className="w-full h-full object-cover" />
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <Upload className="w-6 h-6 text-white" />
+              </div>
+            </>
           ) : (
-            <User className="w-10 h-10 text-slate-400" />
+            <>
+              <User className="w-10 h-10 text-slate-400" />
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <Camera className="w-6 h-6 text-white" />
+              </div>
+            </>
           )}
         </div>
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          onChange={handleFileChange} 
+          accept="image/*" 
+          className="hidden" 
+        />
+        <button 
+          type="button" 
+          onClick={() => fileInputRef.current?.click()}
+          className="text-xs font-bold text-blue-600 hover:text-blue-700 mb-2 inline-block"
+        >
+          تغيير الصورة الشخصية
+        </button>
+
         <h2 className="text-xl font-bold text-slate-800">{userData?.fullName || 'مستخدم'}</h2>
         <p className="text-sm text-slate-500 mb-2">@{userData?.username || currentUser?.email}</p>
         <span className="inline-block px-3 py-1 bg-blue-50 text-blue-700 font-bold rounded-full text-xs">
@@ -129,7 +199,7 @@ export const Profile = () => {
               dir="ltr"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-left focus:outline-none focus:border-blue-500"
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-left focus:outline-none focus:border-blue-500 text-sm"
               placeholder="01xxxxxxxxx"
             />
             <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
@@ -144,7 +214,7 @@ export const Profile = () => {
               dir="ltr"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-left focus:outline-none focus:border-blue-500"
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-left focus:outline-none focus:border-blue-500 text-sm"
               placeholder="••••••••"
             />
             <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
@@ -153,7 +223,7 @@ export const Profile = () => {
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || compressing}
           className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 mt-4"
         >
           {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : 'حفظ التعديلات'}
