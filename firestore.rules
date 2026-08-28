@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Utility Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && getUserData().role == 'admin';
+    }
+    
+    function isAssistant() {
+      return isSignedIn() && getUserData().role == 'assistant';
+    }
+
+    // --- Users Collection ---
+    // Anyone logged in can read user profiles (needed for names/avatars)
+    // Users can only edit their own profile (First Login Setup)
+    // Admins can do everything
+    match /users/{userId} {
+      allow read: if isSignedIn(); 
+      allow write: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    // --- Settings & Master Data ---
+    // Read: All / Write: Admins only
+    match /areas/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /teams/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /activity_types/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /monthly_winners/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // --- Records & Logs ---
+    match /attendance_records/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isAssistant();
+    }
+    match /points_log/{document=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isAssistant() && request.resource.data.addedBy == request.auth.uid);
+    }
+
+    // --- Requests ---
+    match /registration_requests/{requestId} {
+      allow read: if isSignedIn();
+      // Deacons can create requests
+      allow create: if isSignedIn() && request.resource.data.deaconId == request.auth.uid;
+      // Admins and Assistants can approve/reject (update)
+      allow update, delete: if isAdmin() || isAssistant();
+    }
+
+    // --- Afetqad (Visitation) ---
+    match /afetqad_assignments/{assignmentId} {
+      allow read: if isSignedIn();
+      // Admins can create/delete. Callers can update their own assignments (mark as completed)
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.callerId == request.auth.uid);
+    }
+    match /home_visits/{visitId} {
+      // Hidden from deacons/parents. Only admins & assistants.
+      allow read, write: if isAdmin() || isAssistant();
+    }
+
+    // --- Notifications ---
+    match /notifications_scheduled/{notifId} {
+      allow read, write: if isAdmin();
+    }
+    match /notifications_inbox/{inboxId} {
+      // Users can read/update their own inbox (mark as read)
+      allow read, update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Admins can dispatch (create) to anyone
+      allow create: if isAdmin();
+    }
+  }
+}
