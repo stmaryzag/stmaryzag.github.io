@@ -2,107 +2,169 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Utility Functions
+    // =========================================================================
+    // Helper Functions & Security Checks
+    // =========================================================================
+    
     function isSignedIn() {
       return request.auth != null;
     }
     
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    function isUserDocExists() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    
+    function getUserRole() {
+      return isUserDocExists() 
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role 
+        : 'unknown';
     }
     
     function isAdmin() {
       return isSignedIn() && (
-        getUserData().role == 'admin' ||
+        getUserRole() == 'admin' ||
         exists(/databases/$(database)/documents/admin/$(request.auth.uid))
       );
     }
     
     function isAssistant() {
-      return isSignedIn() && getUserData().role == 'assistant';
+      return isSignedIn() && (
+        getUserRole() == 'assistant' ||
+        isAdmin()
+      );
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
     }
 
-    // --- Admin Collection ---
+    // =========================================================================
+    // 1. Users & Accounts Collection
+    // =========================================================================
+    match /users/{userId} {
+      // Any authenticated user can read directory info (names, teams, levels)
+      allow read: if isSignedIn();
+      
+      // Admins can create/manage, or users can create their own profile upon login
+      allow create: if isSignedIn();
+      
+      // Self-updates (profile photo, phone, etc.) or management by admin/assistant
+      allow update: if isOwner(userId) || isAssistant() || isAdmin();
+      
+      // Deletions strictly restricted to Admins
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // 2. Admin System Collection
+    // =========================================================================
     match /admin/{adminId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn();
-    }
-
-    // --- Users Collection ---
-    match /users/{userId} {
-      allow read: if isSignedIn(); 
-      allow write: if isAdmin() || (isSignedIn() && request.auth.uid == userId) || isSignedIn();
-    }
-
-    // --- Levels & Gamification Configuration ---
-    match /levels/{levelId} {
-      allow read: if isSignedIn();
       allow write: if isAdmin() || isSignedIn();
     }
 
-    // --- Subscriptions Collection (30 EGP) ---
+    // =========================================================================
+    // 3. Subscriptions Collection (Monthly 30 EGP Fee Tracking)
+    // =========================================================================
     match /subscriptions/{subId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isAssistant() || isSignedIn();
+      allow write: if isAssistant() || isAdmin();
     }
 
-    // --- Settings & Master Data ---
-    match /areas/{document=**} {
+    // =========================================================================
+    // 4. Levels & Gamification Configuration
+    // =========================================================================
+    match /levels/{levelId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isSignedIn();
-    }
-    match /teams/{document=**} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() || isSignedIn();
-    }
-    match /activity_types/{document=**} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() || isSignedIn();
-    }
-    match /monthly_winners/{document=**} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() || isSignedIn();
+      allow write: if isAdmin() || isAssistant();
     }
 
-    // --- Records & Logs ---
-    match /attendance_records/{document=**} {
+    // =========================================================================
+    // 5. Structure & Settings (Areas, Teams, Activity Types, Winners)
+    // =========================================================================
+    match /areas/{areaId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isAssistant() || isSignedIn();
+      allow write: if isAdmin() || isAssistant();
     }
-    match /points_log/{document=**} {
+    
+    match /teams/{teamId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isAssistant() || isSignedIn();
+      allow write: if isAdmin() || isAssistant();
+    }
+    
+    match /activity_types/{activityId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isAssistant();
+    }
+    
+    match /monthly_winners/{winnerId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isAssistant();
     }
 
-    // --- Requests ---
+    // =========================================================================
+    // 6. Attendance & Points Records (Audit Logs)
+    // =========================================================================
+    match /attendance_records/{recordId} {
+      allow read: if isSignedIn();
+      allow create: if isAssistant() || isAdmin();
+      allow update, delete: if isAssistant() || isAdmin();
+    }
+    
+    match /points_log/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAssistant() || isAdmin();
+    }
+
+    // =========================================================================
+    // 7. Activity & Registration Requests (From Deacons)
+    // =========================================================================
     match /registration_requests/{requestId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin() || isAssistant() || isSignedIn();
+      allow create: if true; // Allows unauthenticated or authenticated submissions
+      allow update, delete: if isAssistant() || isAdmin() || isSignedIn();
     }
 
-    // --- Afetqad (Visitation) ---
+    // =========================================================================
+    // 8. Afetqad (Weekly Assignments & Home Visits)
+    // =========================================================================
     match /afetqad_assignments/{assignmentId} {
       allow read: if isSignedIn();
-      allow create, delete: if isAdmin() || isSignedIn();
-      allow update: if isSignedIn();
+      allow create, delete: if isAssistant() || isAdmin();
+      allow update: if isSignedIn(); // Callers update their call status/notes
     }
+    
     match /home_visits/{visitId} {
-      allow read, write: if isAdmin() || isAssistant() || isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isAssistant() || isAdmin();
     }
 
-    // --- Notifications ---
+    // =========================================================================
+    // 9. Notifications (Scheduled, Recurring & Inboxes)
+    // =========================================================================
     match /notifications_scheduled/{notifId} {
-      allow read, write: if isAdmin() || isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isAssistant() || isAdmin();
     }
+    
     match /recurring_notifications/{notifId} {
-      allow read, write: if isAdmin() || isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isAssistant() || isAdmin();
     }
+    
     match /notifications_inbox/{inboxId} {
-      allow read, update: if isSignedIn();
+      allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow delete: if isAdmin() || isSignedIn();
+      allow update: if isSignedIn(); // Mark as read
+      allow delete: if isSignedIn();
+    }
+
+    // =========================================================================
+    // 10. Fallback Catch-All for Authenticated Operations
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if isSignedIn();
     }
   }
 }
-

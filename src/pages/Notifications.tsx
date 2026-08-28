@@ -14,12 +14,15 @@ export const Notifications = () => {
     
     const q = query(
       collection(db, 'notifications_inbox'), 
-      where('userId', '==', userData.id),
-      orderBy('createdAt', 'desc')
+      where('userId', '==', userData.id)
     );
     
     const unsub = onSnapshot(q, (snapshot) => {
-      setNotifications(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      setNotifications(list);
+    }, (error) => {
+      console.error("Notifications snapshot error:", error);
     });
 
     return () => unsub();

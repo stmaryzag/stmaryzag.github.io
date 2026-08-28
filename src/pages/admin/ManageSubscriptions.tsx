@@ -64,6 +64,7 @@ export const ManageSubscriptions = () => {
 
   // Toggle or Record Payment of 30 EGP
   const togglePayment = async (deacon: UserData) => {
+    if (!deacon?.id) return;
     const isPaid = !!subscriptions[deacon.id]?.paid;
     const subDocId = `${deacon.id}_${currentMonthKey}`;
     setActionLoading(deacon.id);
@@ -71,44 +72,48 @@ export const ManageSubscriptions = () => {
     setSuccessMsg('');
 
     try {
+      const deaconNameStr = deacon.fullName || deacon.username || 'شماس';
+      const recorderId = userData?.id || 'admin';
+      const recorderName = userData?.fullName || 'المسؤول';
+
       if (isPaid) {
-        // Mark as unpaid / delete or update
+        // Mark as unpaid / update
         await setDoc(doc(db, 'subscriptions', subDocId), {
           deaconId: deacon.id,
-          deaconName: deacon.fullName,
+          deaconName: deaconNameStr,
           monthKey: currentMonthKey,
-          year: selectedYear,
-          month: selectedMonth,
+          year: Number(selectedYear),
+          month: Number(selectedMonth),
           amount: 30,
           paid: false,
           updatedAt: new Date().toISOString(),
-          recordedBy: userData?.id || 'admin',
-          recordedByName: userData?.fullName || 'المسؤول'
+          recordedBy: recorderId,
+          recordedByName: recorderName
         }, { merge: true });
 
-        setSuccessMsg(`تم إلغاء تسجيل اشتراك شهر ${selectedMonth} للشماس ${deacon.fullName}`);
+        setSuccessMsg(`تم إلغاء تسجيل اشتراك شهر ${selectedMonth} للشماس ${deaconNameStr}`);
       } else {
         // Mark as paid 30 EGP
         await setDoc(doc(db, 'subscriptions', subDocId), {
           deaconId: deacon.id,
-          deaconName: deacon.fullName,
+          deaconName: deaconNameStr,
           monthKey: currentMonthKey,
-          year: selectedYear,
-          month: selectedMonth,
+          year: Number(selectedYear),
+          month: Number(selectedMonth),
           amount: 30,
           paid: true,
           paidAt: new Date().toISOString(),
-          recordedBy: userData?.id || 'admin',
-          recordedByName: userData?.fullName || 'المسؤول'
+          recordedBy: recorderId,
+          recordedByName: recorderName
         }, { merge: true });
 
-        setSuccessMsg(`تم تسجيل دفع اشتراك شهر ${selectedMonth} (30 ج) للشماس ${deacon.fullName} بنجاح ✅`);
+        setSuccessMsg(`تم تسجيل دفع اشتراك شهر ${selectedMonth} (30 ج) للشماس ${deaconNameStr} بنجاح ✅`);
       }
 
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err: any) {
-      console.error(err);
-      setErrorMsg('تعذر تحديث حالة الاشتراك: ' + err.message);
+      console.error("Subscription update error:", err);
+      setErrorMsg('تعذر تحديث حالة الاشتراك: ' + (err?.message || 'خطأ غير متوقع'));
     } finally {
       setActionLoading(null);
     }
