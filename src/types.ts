@@ -49,6 +49,30 @@ export interface ActivityType {
   category?: 'liturgy' | 'confession' | 'hymns' | 'service' | 'other';
 }
 
+export interface UserLevel {
+  id?: string;
+  levelNumber: number;
+  title: string;
+  minPoints: number;
+  badgeColor?: string;
+  icon?: string;
+  description?: string;
+}
+
+export interface RecurringNotification {
+  id?: string;
+  title: string;
+  body: string;
+  dayOfWeek: number; // 0 = Sunday, 1 = Monday, 2 = Tuesday, 3 = Wednesday, 4 = Thursday, 5 = Friday, 6 = Saturday
+  time: string; // "HH:MM" 24h
+  audience: 'all' | 'deacons' | 'parents';
+  colorTag: 'blue' | 'green' | 'red' | 'yellow';
+  active: boolean;
+  lastDispatchedWeekKey?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
 export interface PointLog {
   id?: string;
   deaconId: string;

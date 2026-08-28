@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, addDoc, where, orderBy, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { 
+  collection, query, getDocs, addDoc, where, orderBy, doc, getDoc, 
+  updateDoc, deleteDoc, writeBatch 
+} from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Phone, Home, Loader2, Users, CheckCircle, RefreshCcw } from 'lucide-react';
+import { 
+  Phone, Home, Loader2, Users, CheckCircle2, RefreshCcw, 
+  UserX, ShieldAlert, Sparkles, Filter, Search, Check, Clock,
+  ArrowRight, PhoneCall, AlertTriangle
+} from 'lucide-react';
+import { UserData } from '../../types';
 
 export const ManageAfetqad = () => {
   const { userData } = useAuth();
@@ -10,143 +18,265 @@ export const ManageAfetqad = () => {
   
   // Weekly assignments state
   const [loadingAlgorithm, setLoadingAlgorithm] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [deacons, setDeacons] = useState<UserData[]>([]);
+  
+  // Absent deacons selection for the current week
+  const [absentIds, setAbsentIds] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterView, setFilterView] = useState<'all' | 'absent' | 'completed' | 'pending'>('all');
   
   // Home visits state
-  const [deacons, setDeacons] = useState<any[]>([]);
   const [homeVisits, setHomeVisits] = useState<any[]>([]);
   const [selectedDeacon, setSelectedDeacon] = useState('');
   const [visitDate, setVisitDate] = useState('');
   const [visitNotes, setVisitNotes] = useState('');
   const [savingVisit, setSavingVisit] = useState(false);
 
-  useEffect(() => {
-    fetchDeacons();
-    if (activeTab === 'weekly') {
-      fetchWeeklyAssignments();
-    } else {
-      fetchHomeVisits();
-    }
-  }, [activeTab]);
-
-  const fetchDeacons = async () => {
-    const q = query(collection(db, 'users'), where('role', '==', 'deacon'));
-    const snap = await getDocs(q);
-    setDeacons(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-  };
-
-  const fetchWeeklyAssignments = async () => {
-    // Get assignments for current week
-    const weekKey = getWeekKey();
-    const q = query(collection(db, 'afetqad_assignments'), where('weekKey', '==', weekKey));
-    const snap = await getDocs(q);
-    
-    // Enrich with names
-    const data = await Promise.all(snap.docs.map(async d => {
-      const docData = d.data();
-      const callerSnap = await getDoc(doc(db, 'users', docData.callerId));
-      const targetSnap = await getDoc(doc(db, 'users', docData.targetId));
-      return {
-        id: d.id,
-        ...docData,
-        callerName: callerSnap.exists() ? callerSnap.data().fullName : 'مجهول',
-        targetName: targetSnap.exists() ? targetSnap.data().fullName : 'مجهول',
-        targetPhone: targetSnap.exists() ? targetSnap.data().phone : ''
-      };
-    }));
-    setAssignments(data);
-  };
-
-  const fetchHomeVisits = async () => {
-    const q = query(collection(db, 'home_visits'), orderBy('date', 'desc'));
-    const snap = await getDocs(q);
-    const data = await Promise.all(snap.docs.map(async d => {
-      const docData = d.data();
-      const deaconSnap = await getDoc(doc(db, 'users', docData.deaconId));
-      return {
-        id: d.id,
-        ...docData,
-        deaconName: deaconSnap.exists() ? deaconSnap.data().fullName : 'مجهول'
-      };
-    }));
-    setHomeVisits(data);
-  };
-
   const getWeekKey = () => {
     const now = new Date();
-    // Monday as start of week
     const day = now.getDay();
     const diff = now.getDate() - day + (day === 0 ? -6 : 1); 
     const monday = new Date(now.setDate(diff));
     return monday.toISOString().slice(0, 10);
   };
 
+  const currentWeekKey = getWeekKey();
+
+  useEffect(() => {
+    fetchInitialData();
+  }, [activeTab]);
+
+  const fetchInitialData = async () => {
+    setLoadingData(true);
+    try {
+      const qDeacons = query(collection(db, 'users'), where('role', '==', 'deacon'));
+      const snap = await getDocs(qDeacons);
+      const allDeacons = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserData));
+      setDeacons(allDeacons);
+
+      if (activeTab === 'weekly') {
+        await fetchWeeklyAssignments(allDeacons);
+      } else {
+        await fetchHomeVisits(allDeacons);
+      }
+    } catch (e) {
+      console.error("Error loading afetqad data:", e);
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  const fetchWeeklyAssignments = async (deaconsList = deacons) => {
+    const q = query(collection(db, 'afetqad_assignments'), where('weekKey', '==', currentWeekKey));
+    const snap = await getDocs(q);
+    
+    const deaconsMap = new Map<string, UserData>(deaconsList.map(d => [d.id, d]));
+
+    const data: any[] = snap.docs.map(d => {
+      const docData = d.data();
+      const caller = deaconsMap.get(docData.callerId);
+      const target = deaconsMap.get(docData.targetId);
+
+      return {
+        id: d.id,
+        ...docData,
+        callerName: caller ? caller.fullName : 'غير معروف',
+        callerPhone: caller?.ownPhone || caller?.parentPhone || '',
+        targetName: target ? target.fullName : 'غير معروف',
+        targetPhone: target?.ownPhone || target?.parentPhone || '',
+        targetPhoto: target?.photoUrl
+      };
+    });
+
+    setAssignments(data);
+
+    // Extract absent IDs from existing priority assignments if available
+    const priorityTargets = new Set<string>();
+    data.forEach(a => {
+      if (a.priority && a.targetId) priorityTargets.add(a.targetId);
+    });
+    if (priorityTargets.size > 0 && absentIds.length === 0) {
+      setAbsentIds(Array.from(priorityTargets));
+    }
+  };
+
+  const fetchHomeVisits = async (deaconsList = deacons) => {
+    const q = query(collection(db, 'home_visits'), orderBy('date', 'desc'));
+    const snap = await getDocs(q);
+    const deaconsMap = new Map<string, UserData>(deaconsList.map(d => [d.id, d]));
+
+    const data = snap.docs.map(d => {
+      const docData = d.data();
+      const deacon = deaconsMap.get(docData.deaconId);
+      return {
+        id: d.id,
+        ...docData,
+        deaconName: deacon ? deacon.fullName : 'غير معروف'
+      };
+    });
+    setHomeVisits(data);
+  };
+
+  const toggleAbsent = (deaconId: string) => {
+    setAbsentIds(prev => 
+      prev.includes(deaconId) ? prev.filter(id => id !== deaconId) : [...prev, deaconId]
+    );
+  };
+
+  // The Algorithmic Distribution Engine
   const runAlgorithm = async () => {
-    if (!window.confirm('هل أنت متأكد من تشغيل خوارزمية التوزيع لهذا الأسبوع؟ سيتم مسح التوزيعات السابقة لنفس الأسبوع.')) return;
+    if (deacons.length < 2) {
+      alert('يجب وجود شماسين على الأقل لتشغيل التوزيع.');
+      return;
+    }
+
+    const confirmMsg = `تأكيد توزيع الافتقاد لهذا الأسبوع (${currentWeekKey}):\n` +
+      `• إجمالي الشمامسة: ${deacons.length}\n` +
+      `• الغائبين المحددين (أولوية 6 اتصالات): ${absentIds.length}\n` +
+      `• غير الغائبين (3 اتصالات): ${deacons.length - absentIds.length}\n` +
+      `• كل شماس سيُسند إليه 3 زملاء ليتصل بهم.\n\nهل تريد المتابعة وحفظ التوزيع؟`;
+
+    if (!window.confirm(confirmMsg)) return;
+
     setLoadingAlgorithm(true);
     try {
-      const weekKey = getWeekKey();
-      
-      // Simulation of Backend Cloud Function
-      // 1. Fetch deacons
-      const deaconsList = deacons;
-      
-      // 2. Identify active callers (present last Friday) vs Priority targets (absent)
-      // For this prototype, we'll randomize since we don't have historical friday data seeded
-      const shuffled = [...deaconsList].sort(() => 0.5 - Math.random());
-      const presentPool = shuffled.slice(0, Math.ceil(shuffled.length / 2));
-      const absentPool = shuffled.slice(Math.ceil(shuffled.length / 2));
-      
-      // 3. Clear existing for this week
-      const qOld = query(collection(db, 'afetqad_assignments'), where('weekKey', '==', weekKey));
+      const N = deacons.length;
+      const tasksPerCaller = Math.min(3, N - 1);
+      const absentSet = new Set(absentIds);
+
+      // Best algorithm solver with multiple randomized attempts
+      let bestSolution: Array<{ callerId: string; targetId: string; priority: boolean }> | null = null;
+      let minPenalty = Infinity;
+
+      for (let attempt = 0; attempt < 200; attempt++) {
+        const callerAssignments: Record<string, string[]> = {};
+        const targetIncoming: Record<string, number> = {};
+        deacons.forEach(d => {
+          callerAssignments[d.id] = [];
+          targetIncoming[d.id] = 0;
+        });
+
+        // 1. Phase 1: Allocate Absent Targets (Priority: 6 calls each, or up to N-1)
+        const targetCapacity: Record<string, number> = {};
+        deacons.forEach(d => {
+          targetCapacity[d.id] = absentSet.has(d.id) ? Math.min(6, N - 1) : Math.min(3, N - 1);
+        });
+
+        // Shuffle deacons for randomness
+        const shuffledCallers = [...deacons].sort(() => 0.5 - Math.random());
+        const shuffledAbsent = deacons.filter(d => absentSet.has(d.id)).sort(() => 0.5 - Math.random());
+        const shuffledPresent = deacons.filter(d => !absentSet.has(d.id)).sort(() => 0.5 - Math.random());
+
+        // Fill absent targets first
+        for (const target of shuffledAbsent) {
+          const needed = targetCapacity[target.id];
+          const availableCallers = shuffledCallers
+            .filter(c => c.id !== target.id && callerAssignments[c.id].length < tasksPerCaller)
+            .sort((a, b) => callerAssignments[a.id].length - callerAssignments[b.id].length);
+
+          for (const caller of availableCallers) {
+            if (targetIncoming[target.id] >= needed) break;
+            if (!callerAssignments[caller.id].includes(target.id)) {
+              callerAssignments[caller.id].push(target.id);
+              targetIncoming[target.id]++;
+            }
+          }
+        }
+
+        // Fill remaining slots for callers who have < tasksPerCaller
+        for (const caller of shuffledCallers) {
+          while (callerAssignments[caller.id].length < tasksPerCaller) {
+            // Pick target with lowest incoming count that isn't the caller and not already assigned
+            const candidates = [...deacons]
+              .filter(t => t.id !== caller.id && !callerAssignments[caller.id].includes(t.id))
+              .sort((a, b) => {
+                // prioritize under-capacity targets
+                const diffA = targetIncoming[a.id] - targetCapacity[a.id];
+                const diffB = targetIncoming[b.id] - targetCapacity[b.id];
+                return diffA - diffB;
+              });
+
+            if (candidates.length === 0) break;
+            const chosen = candidates[0];
+            callerAssignments[caller.id].push(chosen.id);
+            targetIncoming[chosen.id]++;
+          }
+        }
+
+        // Calculate penalty
+        let penalty = 0;
+        deacons.forEach(d => {
+          // Caller must have exact tasksPerCaller
+          const callerShortage = tasksPerCaller - callerAssignments[d.id].length;
+          penalty += callerShortage * 100;
+
+          // Target capacity difference
+          const targetDiff = Math.abs(targetIncoming[d.id] - targetCapacity[d.id]);
+          penalty += targetDiff * 5;
+        });
+
+        if (penalty < minPenalty) {
+          minPenalty = penalty;
+          const sol: Array<{ callerId: string; targetId: string; priority: boolean }> = [];
+          Object.entries(callerAssignments).forEach(([cId, targets]) => {
+            targets.forEach(tId => {
+              sol.push({
+                callerId: cId,
+                targetId: tId,
+                priority: absentSet.has(tId)
+              });
+            });
+          });
+          bestSolution = sol;
+          if (penalty === 0) break;
+        }
+      }
+
+      if (!bestSolution || bestSolution.length === 0) {
+        throw new Error('تعذر إيجاد حل توزيع متوازن');
+      }
+
+      // Step 2: Delete previous assignments for this week
+      const qOld = query(collection(db, 'afetqad_assignments'), where('weekKey', '==', currentWeekKey));
       const oldSnap = await getDocs(qOld);
-      // Not strictly deleting for safety in prototype, normally would run a batch delete
-      
-      // 4. Assign callers
-      const newAssignments = [];
-      const callers = [...presentPool];
-      
-      // Priority (Absent) get 2 callers
-      for (const target of absentPool) {
-        let assigned = 0;
-        for (let i = 0; i < callers.length && assigned < 2; i++) {
-          if (callers[i].id !== target.id) {
-            newAssignments.push({ callerId: callers[i].id, targetId: target.id, priority: true });
-            assigned++;
-          }
-        }
+      for (const d of oldSnap.docs) {
+        await deleteDoc(doc(db, 'afetqad_assignments', d.id));
       }
-      
-      // Regular (Present) get 1 caller
-      for (const target of presentPool) {
-        let assigned = 0;
-        for (let i = callers.length - 1; i >= 0 && assigned < 1; i--) {
-          if (callers[i].id !== target.id) {
-            newAssignments.push({ callerId: callers[i].id, targetId: target.id, priority: false });
-            assigned++;
-          }
-        }
-      }
-      
-      // 5. Save to Firestore
-      for (const req of newAssignments) {
+
+      // Step 3: Insert new assignments into Firestore
+      for (const item of bestSolution) {
         await addDoc(collection(db, 'afetqad_assignments'), {
-          callerId: req.callerId,
-          targetId: req.targetId,
-          weekKey,
-          priority: req.priority,
+          callerId: item.callerId,
+          targetId: item.targetId,
+          weekKey: currentWeekKey,
+          priority: item.priority,
           status: 'pending',
           createdAt: new Date().toISOString()
         });
       }
-      
-      await fetchWeeklyAssignments();
-      alert('تم توليد وتوزيع مهام الافتقاد بنجاح!');
-    } catch (error) {
-      console.error(error);
-      alert('حدث خطأ أثناء تشغيل الخوارزمية.');
+
+      await fetchWeeklyAssignments(deacons);
+      alert(`تم التوزيع بنجاح! تم إنشاء ${bestSolution.length} مهمة اتصال (${tasksPerCaller} مهام لكل شماس).`);
+    } catch (err: any) {
+      console.error("Algorithm error:", err);
+      alert('حدث خطأ أثناء تشغيل الخوارزمية: ' + err.message);
     } finally {
       setLoadingAlgorithm(false);
+    }
+  };
+
+  const handleToggleTaskStatus = async (taskId: string, currentStatus: string) => {
+    try {
+      const newStatus = currentStatus === 'completed' ? 'pending' : 'completed';
+      await updateDoc(doc(db, 'afetqad_assignments', taskId), {
+        status: newStatus,
+        completedAt: newStatus === 'completed' ? new Date().toISOString() : null
+      });
+      setAssignments(prev => prev.map(a => a.id === taskId ? { ...a, status: newStatus } : a));
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -165,7 +295,8 @@ export const ManageAfetqad = () => {
       setSelectedDeacon('');
       setVisitDate('');
       setVisitNotes('');
-      await fetchHomeVisits();
+      await fetchHomeVisits(deacons);
+      alert('تم حفظ الزيارة المنزلية بنجاح.');
     } catch (error) {
       console.error(error);
     } finally {
@@ -173,77 +304,341 @@ export const ManageAfetqad = () => {
     }
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3">
-        <div className="p-3 bg-orange-100 text-orange-600 rounded-xl">
-          <Phone className="w-6 h-6" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">نظام الافتقاد</h2>
-          <p className="text-sm text-slate-500">التوزيع الأسبوعي الهاتفي والافتقاد المنزلي</p>
-        </div>
-      </div>
+  // Group assignments by caller
+  const groupedByCaller = React.useMemo(() => {
+    const map = new Map<string, { caller: UserData | undefined; tasks: any[] }>();
+    deacons.forEach(d => map.set(d.id, { caller: d, tasks: [] }));
 
-      <div className="flex gap-2">
-        <button 
-          onClick={() => setActiveTab('weekly')}
-          className={`flex-1 py-3 font-bold rounded-xl transition-colors ${activeTab === 'weekly' ? 'bg-orange-500 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'}`}
-        >
-          الافتقاد الأسبوعي (الخوارزمية)
-        </button>
-        <button 
-          onClick={() => setActiveTab('home')}
-          className={`flex-1 py-3 font-bold rounded-xl transition-colors ${activeTab === 'home' ? 'bg-orange-500 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200'}`}
-        >
-          الافتقاد المنزلي
-        </button>
+    assignments.forEach(a => {
+      const entry = map.get(a.callerId);
+      if (entry) {
+        entry.tasks.push(a);
+      }
+    });
+
+    return Array.from(map.values());
+  }, [assignments, deacons]);
+
+  const filteredCallerGroups = groupedByCaller.filter(group => {
+    if (!group.caller) return false;
+    const nameMatch = group.caller.fullName.toLowerCase().includes(searchTerm.toLowerCase());
+    if (!nameMatch) {
+      // search inside assigned targets
+      const targetMatch = group.tasks.some(t => t.targetName?.toLowerCase().includes(searchTerm.toLowerCase()));
+      if (!targetMatch) return false;
+    }
+
+    if (filterView === 'absent') {
+      return absentIds.includes(group.caller.id);
+    }
+    if (filterView === 'completed') {
+      return group.tasks.length > 0 && group.tasks.every(t => t.status === 'completed');
+    }
+    if (filterView === 'pending') {
+      return group.tasks.some(t => t.status !== 'completed');
+    }
+    return true;
+  });
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto">
+      {/* Header Banner */}
+      <div className="bg-gradient-to-r from-orange-600 via-amber-600 to-orange-700 text-white p-6 rounded-3xl shadow-md">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-white/15 backdrop-blur-md rounded-2xl border border-white/20">
+              <Phone className="w-8 h-8 text-orange-200" />
+            </div>
+            <div>
+              <span className="inline-block px-3 py-0.5 bg-orange-500/30 text-orange-100 text-xs font-bold rounded-full mb-1">
+                نظام الافتقاد الذكي الأسبوعي
+              </span>
+              <h2 className="text-xl md:text-2xl font-black">توزيع ومتابعة افتقاد الشمامسة</h2>
+              <p className="text-xs text-orange-100/80 mt-0.5">
+                توزيع عادل ودقيق: 3 أسماء لكل شماس • الغائب يحظى بـ 6 متصلين • الحاضر بـ 3 متصلين
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setActiveTab('weekly')}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                activeTab === 'weekly' 
+                  ? 'bg-white text-orange-900 shadow-sm' 
+                  : 'bg-white/15 text-white hover:bg-white/25 border border-white/20'
+              }`}
+            >
+              الافتقاد الأسبوعي (3 أسماء)
+            </button>
+            <button 
+              onClick={() => setActiveTab('home')}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                activeTab === 'home' 
+                  ? 'bg-white text-orange-900 shadow-sm' 
+                  : 'bg-white/15 text-white hover:bg-white/25 border border-white/20'
+              }`}
+            >
+              الزيارات المنزلية
+            </button>
+          </div>
+        </div>
       </div>
 
       {activeTab === 'weekly' && (
         <div className="space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-4">
-            <div>
-              <h3 className="font-bold text-slate-800">توزيع أسبوع: {getWeekKey()}</h3>
-              <p className="text-sm text-slate-500">يقوم النظام بتوزيع الشمامسة المتغيبين على الحاضرين.</p>
+          {/* Algorithm Setup Box: Absent Selection & Run Button */}
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-base flex items-center gap-2">
+                  <UserX className="w-5 h-5 text-rose-500" />
+                  تحديد الغائبين عن قداس هذا الأسبوع ({absentIds.length} غائب)
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  اضغط على اسم الشماس لتحديده كغائب (يحصل الغائب على أولوية 6 متصلين للاطمئنان عليه)
+                </p>
+              </div>
+
+              <button 
+                onClick={runAlgorithm}
+                disabled={loadingAlgorithm}
+                className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-slate-900/20 transition-all disabled:opacity-50"
+              >
+                {loadingAlgorithm ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
+                    جاري تشغيل الخوارزمية وتوزيع الـ 3 أسماء...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCcw className="w-4 h-4 text-orange-400" />
+                    توليد وتوزيع الافتقاد لهذا الأسبوع
+                  </>
+                )}
+              </button>
             </div>
-            <button 
-              onClick={runAlgorithm}
-              disabled={loadingAlgorithm}
-              className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors disabled:opacity-50"
-            >
-              {loadingAlgorithm ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCcw className="w-5 h-5" />}
-              تشغيل الخوارزمية الآن
-            </button>
+
+            {/* Absent Toggle Grid */}
+            <div>
+              <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-1">
+                {deacons.map(d => {
+                  const isAbsent = absentIds.includes(d.id);
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => toggleAbsent(d.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                        isAbsent 
+                          ? 'bg-rose-500 text-white border-rose-600 shadow-xs' 
+                          : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border-slate-200'
+                      }`}
+                    >
+                      <span>{d.fullName}</span>
+                      {isAbsent ? (
+                        <span className="bg-rose-700 text-white text-[10px] px-1.5 py-0.2 rounded-md">غائب (6)</span>
+                      ) : (
+                        <span className="text-slate-400 text-[10px]">حاضر</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Quick Stats Summary */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-2xl text-center">
+                <span className="text-[10px] text-blue-700 font-bold block">إجمالي الشمامسة</span>
+                <span className="text-lg font-black text-blue-900">{deacons.length}</span>
+              </div>
+              <div className="p-3 bg-rose-50/70 border border-rose-100 rounded-2xl text-center">
+                <span className="text-[10px] text-rose-700 font-bold block">الغائبين (أولوية 6 اتصالات)</span>
+                <span className="text-lg font-black text-rose-900">{absentIds.length}</span>
+              </div>
+              <div className="p-3 bg-emerald-50/70 border border-emerald-100 rounded-2xl text-center">
+                <span className="text-[10px] text-emerald-700 font-bold block">الحاضرين (3 اتصالات)</span>
+                <span className="text-lg font-black text-emerald-900">{deacons.length - absentIds.length}</span>
+              </div>
+              <div className="p-3 bg-amber-50/70 border border-amber-100 rounded-2xl text-center">
+                <span className="text-[10px] text-amber-700 font-bold block">مهام الاتصال المنفذة</span>
+                <span className="text-lg font-black text-amber-900">{assignments.length}</span>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
-            {assignments.map(assig => (
-              <div key={assig.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-full ${assig.priority ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
-                    <Users className="w-5 h-5" />
+          {/* Search & Filter Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-100 shadow-xs">
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3" />
+              <input
+                type="text"
+                placeholder="بحث باسم الشماس أو الزميل المسند..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-full pl-3 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-orange-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
+              <button
+                onClick={() => setFilterView('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  filterView === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                الكل ({groupedByCaller.length})
+              </button>
+              <button
+                onClick={() => setFilterView('absent')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  filterView === 'absent' ? 'bg-rose-600 text-white' : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                }`}
+              >
+                الغائبين فقط ({absentIds.length})
+              </button>
+              <button
+                onClick={() => setFilterView('completed')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  filterView === 'completed' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                }`}
+              >
+                تم الاتصال بالكامل
+              </button>
+              <button
+                onClick={() => setFilterView('pending')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  filterView === 'pending' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                }`}
+              >
+                قيد المتابعة
+              </button>
+            </div>
+          </div>
+
+          {/* Deacon Cards with their 3 Assigned Tasks */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredCallerGroups.map(group => {
+              if (!group.caller) return null;
+              const isAbsent = absentIds.includes(group.caller.id);
+              const completedCount = group.tasks.filter(t => t.status === 'completed').length;
+
+              return (
+                <div 
+                  key={group.caller.id} 
+                  className={`bg-white p-5 rounded-3xl border shadow-sm transition-all space-y-4 ${
+                    isAbsent ? 'border-rose-200 bg-rose-50/20' : 'border-slate-100'
+                  }`}
+                >
+                  {/* Caller Header */}
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-3">
+                      {group.caller.photoUrl ? (
+                        <img src={group.caller.photoUrl} alt="" className="w-10 h-10 rounded-full object-cover border border-slate-200" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-sm">
+                          {group.caller.fullName.charAt(0)}
+                        </div>
+                      )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-extrabold text-slate-800 text-sm">{group.caller.fullName}</h4>
+                          {isAbsent && (
+                            <span className="px-2 py-0.2 bg-rose-100 text-rose-800 rounded-md text-[10px] font-black">
+                              غائب
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-mono">
+                          {group.caller.ownPhone || group.caller.parentPhone || 'بدون هاتف'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-left">
+                      <span className={`text-[10px] font-black px-2.5 py-1 rounded-full ${
+                        completedCount === group.tasks.length && group.tasks.length > 0
+                          ? 'bg-emerald-100 text-emerald-800' 
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {completedCount} / {group.tasks.length} اتصالات
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-slate-800">المُتّصِل: {assig.callerName}</h4>
-                    <p className="text-sm text-slate-500">
-                      يتصل بـ: <span className="font-bold text-slate-700">{assig.targetName}</span>
-                      {assig.priority && <span className="ml-2 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-md">أولوية (غياب)</span>}
-                    </p>
+
+                  {/* 3 Assigned Targets */}
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-bold text-slate-600">الشمامسة المطلوب الافتقاد والاتصال بهم (3 أسماء):</p>
+                    {group.tasks.length > 0 ? (
+                      <div className="space-y-2">
+                        {group.tasks.map((task, idx) => (
+                          <div 
+                            key={task.id || idx}
+                            className={`p-3 rounded-2xl border flex items-center justify-between transition-all ${
+                              task.status === 'completed'
+                                ? 'bg-emerald-50/60 border-emerald-200 text-emerald-950'
+                                : 'bg-slate-50 border-slate-100 text-slate-800'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-6 h-6 rounded-full bg-white text-slate-600 text-xs font-black flex items-center justify-center border border-slate-200">
+                                {idx + 1}
+                              </span>
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-xs">{task.targetName}</span>
+                                  {task.priority && (
+                                    <span className="px-1.5 py-0.2 bg-rose-100 text-rose-700 rounded text-[9px] font-extrabold">
+                                      غائب
+                                    </span>
+                                  )}
+                                </div>
+                                {task.targetPhone && (
+                                  <a 
+                                    href={`tel:${task.targetPhone}`}
+                                    className="text-[10px] text-blue-600 hover:underline font-mono block"
+                                  >
+                                    📞 {task.targetPhone}
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => handleToggleTaskStatus(task.id, task.status)}
+                              className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all ${
+                                task.status === 'completed'
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
+                              }`}
+                            >
+                              {task.status === 'completed' ? (
+                                <>
+                                  <CheckCircle2 className="w-3.5 h-3.5" /> تم الاتصال
+                                </>
+                              ) : (
+                                <>
+                                  <Clock className="w-3.5 h-3.5 text-amber-500" /> تعيين كمنجز
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-slate-50 rounded-2xl text-center text-xs text-slate-400 border border-dashed border-slate-200">
+                        لم يتم التوزيع لهذا الشماس بعد
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div>
-                  {assig.status === 'completed' ? (
-                    <span className="text-green-600 flex items-center gap-1 font-bold text-sm bg-green-50 px-3 py-1 rounded-full"><CheckCircle className="w-4 h-4" /> تم الاتصال</span>
-                  ) : (
-                    <span className="text-orange-500 font-bold text-sm bg-orange-50 px-3 py-1 rounded-full">قيد الانتظار</span>
-                  )}
-                </div>
-              </div>
-            ))}
-            {assignments.length === 0 && !loadingAlgorithm && (
-              <div className="text-center p-8 bg-slate-50 rounded-2xl text-slate-500 border border-slate-200 border-dashed">
-                لم يتم تشغيل التوزيع لهذا الأسبوع بعد.
+              );
+            })}
+
+            {filteredCallerGroups.length === 0 && (
+              <div className="col-span-2 text-center p-12 bg-white rounded-3xl border border-slate-200 border-dashed text-slate-400 text-sm">
+                لا توجد نتائج مطابقة لبحثك.
               </div>
             )}
           </div>
@@ -252,47 +647,74 @@ export const ManageAfetqad = () => {
 
       {activeTab === 'home' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="md:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-max">
-            <h3 className="font-bold text-slate-800 mb-4">تسجيل زيارة منزلية جديدة</h3>
+          <div className="md:col-span-1 bg-white p-6 rounded-3xl shadow-sm border border-slate-100 h-max space-y-4">
+            <h3 className="font-extrabold text-slate-800 text-base">تسجيل زيارة منزلية جديدة</h3>
             <form onSubmit={handleSaveHomeVisit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">الشماس</label>
-                <select required value={selectedDeacon} onChange={e => setSelectedDeacon(e.target.value)} className="w-full px-3 py-2 border rounded-xl bg-slate-50">
-                  <option value="">-- اختر --</option>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">الشماس المستهدف:</label>
+                <select 
+                  required 
+                  value={selectedDeacon} 
+                  onChange={e => setSelectedDeacon(e.target.value)} 
+                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:border-orange-500"
+                >
+                  <option value="">-- اختر الشماس --</option>
                   {deacons.map(d => <option key={d.id} value={d.id}>{d.fullName}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">التاريخ</label>
-                <input required type="date" value={visitDate} onChange={e => setVisitDate(e.target.value)} className="w-full px-3 py-2 border rounded-xl bg-slate-50" />
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">تاريخ الزيارة:</label>
+                <input 
+                  required 
+                  type="date" 
+                  value={visitDate} 
+                  onChange={e => setVisitDate(e.target.value)} 
+                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:border-orange-500" 
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">ملاحظات الزيارة</label>
-                <textarea required value={visitNotes} onChange={e => setVisitNotes(e.target.value)} rows={3} className="w-full px-3 py-2 border rounded-xl bg-slate-50" placeholder="ما تم في الزيارة..."></textarea>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">ملاحظات وتقرير الزيارة:</label>
+                <textarea 
+                  required 
+                  value={visitNotes} 
+                  onChange={e => setVisitNotes(e.target.value)} 
+                  rows={3} 
+                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-xs text-slate-800 focus:outline-none focus:border-orange-500" 
+                  placeholder="اكتب ما تم في الزيارة وحالة الشماس والأسرة..."
+                />
               </div>
-              <button disabled={savingVisit} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors">
-                {savingVisit ? <Loader2 className="w-5 h-5 animate-spin" /> : <Home className="w-5 h-5" />}
-                حفظ الزيارة
+              <button 
+                disabled={savingVisit} 
+                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs py-3 rounded-xl flex items-center justify-center gap-2 shadow-md shadow-orange-600/20 transition-all disabled:opacity-50"
+              >
+                {savingVisit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Home className="w-4 h-4" />}
+                حفظ الزيارة في الأرشيف
               </button>
             </form>
           </div>
 
-          <div className="md:col-span-2 space-y-4">
+          <div className="md:col-span-2 space-y-3">
             {homeVisits.map(visit => (
-              <div key={visit.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex gap-4">
-                <div className="p-3 bg-indigo-50 text-indigo-600 rounded-full h-max">
+              <div key={visit.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-start gap-4">
+                <div className="p-3 bg-orange-50 text-orange-600 rounded-2xl shrink-0">
                   <Home className="w-6 h-6" />
                 </div>
-                <div>
-                  <h4 className="font-bold text-slate-800 text-lg">{visit.deaconName}</h4>
-                  <p className="text-xs text-slate-500 mb-2">{new Date(visit.date).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-                  <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-100">{visit.notes}</p>
+                <div className="flex-1 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-extrabold text-slate-800 text-sm">{visit.deaconName}</h4>
+                    <span className="text-[11px] text-slate-400 font-medium">
+                      {new Date(visit.date).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 bg-slate-50 p-3 rounded-2xl border border-slate-100 leading-relaxed">
+                    {visit.notes}
+                  </p>
                 </div>
               </div>
             ))}
             {homeVisits.length === 0 && (
-              <div className="text-center p-8 bg-slate-50 rounded-2xl text-slate-500 border border-slate-200 border-dashed">
-                لا توجد زيارات منزلية مسجلة.
+              <div className="text-center p-12 bg-white rounded-3xl text-slate-400 border border-slate-200 border-dashed text-xs">
+                لا توجد زيارات منزلية مسجلة بعد.
               </div>
             )}
           </div>

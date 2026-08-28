@@ -8,7 +8,8 @@ import {
   ChevronRight, Calendar, ArrowUpRight, CheckCircle2, AlertCircle, HeartHandshake
 } from 'lucide-react';
 import clsx from 'clsx';
-import { SubscriptionRecord } from '../../types';
+import { SubscriptionRecord, UserLevel } from '../../types';
+import { calculateDeaconLevel, DEFAULT_LEVELS } from '../../utils/levels';
 
 const MONTH_NAMES_AR = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -22,6 +23,7 @@ export const DeaconDashboard = () => {
   const [activities, setActivities] = useState<any[]>([]);
   const [afetqadTasks, setAfetqadTasks] = useState<any[]>([]);
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
+  const [levelsList, setLevelsList] = useState<UserLevel[]>(DEFAULT_LEVELS);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState('');
@@ -107,6 +109,15 @@ export const DeaconDashboard = () => {
       return monday.toISOString().slice(0, 10);
     };
 
+    // Fetch Configured User Levels
+    const unsubLevels = onSnapshot(collection(db, 'levels'), (snap) => {
+      if (!snap.empty) {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserLevel));
+        list.sort((a, b) => a.levelNumber - b.levelNumber);
+        setLevelsList(list);
+      }
+    });
+
     const qAfetqad = query(
       collection(db, 'afetqad_assignments'), 
       where('callerId', '==', userData.id),
@@ -131,6 +142,7 @@ export const DeaconDashboard = () => {
       unsubSub();
       unsubActivities();
       unsubAfetqad();
+      unsubLevels();
     };
   }, [userData, currentMonthKey]);
 
@@ -141,16 +153,9 @@ export const DeaconDashboard = () => {
   const totalAllTimePoints = pointsLog
     .reduce((acc, curr) => acc + (curr.points || 0), 0);
 
-  // Level & Rank calculations for Gamification
-  const getDeaconLevel = (points: number) => {
-    if (points >= 200) return { title: 'شماس متميز (أغنسطس)', level: 4, next: 300, color: 'text-amber-400', bg: 'from-amber-600 to-yellow-500' };
-    if (points >= 100) return { title: 'شماس متقدم (إبصالتس)', level: 3, next: 200, color: 'text-purple-300', bg: 'from-purple-600 to-indigo-600' };
-    if (points >= 50) return { title: 'شماس نشيط (مستوى 2)', level: 2, next: 100, color: 'text-blue-300', bg: 'from-blue-600 to-cyan-600' };
-    return { title: 'شماس واعد (مستوى 1)', level: 1, next: 50, color: 'text-emerald-300', bg: 'from-emerald-600 to-teal-600' };
-  };
-
-  const currentRank = getDeaconLevel(totalAllTimePoints);
-  const progressPercent = Math.min(100, Math.round((totalAllTimePoints / currentRank.next) * 100));
+  // Dynamic Level & Rank calculations for Gamification
+  const currentRank = calculateDeaconLevel(totalAllTimePoints, levelsList);
+  const progressPercent = Math.min(100, Math.round((totalAllTimePoints / currentRank.nextLevelPoints) * 100));
 
   const handleRequestRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -243,7 +248,7 @@ export const DeaconDashboard = () => {
                 </div>
               )}
               <div className="absolute -bottom-2 -right-1 bg-amber-500 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full border-2 border-slate-900 shadow-md flex items-center gap-1">
-                <Award className="w-3 h-3" /> Lv.{currentRank.level}
+                <Award className="w-3 h-3" /> Lv.{currentRank.levelNumber}
               </div>
             </div>
 
@@ -259,7 +264,7 @@ export const DeaconDashboard = () => {
                 )}
               </div>
               <h2 className="text-2xl sm:text-3xl font-black tracking-tight">{userData?.fullName}</h2>
-              <p className={`text-xs font-bold mt-1 ${currentRank.color}`}>{currentRank.title}</p>
+              <p className={`text-xs font-bold mt-1 ${currentRank.textColor}`}>{currentRank.title}</p>
             </div>
           </div>
 
@@ -282,12 +287,12 @@ export const DeaconDashboard = () => {
         {/* Level XP Progress Bar */}
         <div className="mt-6 pt-5 border-t border-white/10 space-y-2">
           <div className="flex justify-between text-xs font-bold text-slate-300">
-            <span>التقدم نحو الرتبة التالية ({currentRank.next} نقطة)</span>
-            <span className="text-amber-300">{totalAllTimePoints} / {currentRank.next} ({progressPercent}%)</span>
+            <span>التقدم نحو الرتبة التالية ({currentRank.nextLevelPoints} نقطة)</span>
+            <span className="text-amber-300">{totalAllTimePoints} / {currentRank.nextLevelPoints} ({progressPercent}%)</span>
           </div>
           <div className="w-full bg-slate-800/80 rounded-full h-3.5 overflow-hidden p-0.5 border border-white/10">
             <div 
-              className={`bg-gradient-to-r ${currentRank.bg} h-full rounded-full transition-all duration-500 shadow-md`}
+              className={`bg-gradient-to-r ${currentRank.bgGradient} h-full rounded-full transition-all duration-500 shadow-md`}
               style={{ width: `${progressPercent}%` }}
             />
           </div>

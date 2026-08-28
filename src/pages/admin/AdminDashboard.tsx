@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Users, MapPin, Trophy, Activity, ChevronLeft, Clock, Star, Medal, 
   Phone, Bell, CreditCard, Cake, Sparkles, Send, CheckCircle2,
-  AlertCircle
+  AlertCircle, Award
 } from 'lucide-react';
 import { collection, query, where, onSnapshot, addDoc, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -130,6 +130,13 @@ export const AdminDashboard = () => {
       color: 'bg-emerald-600',
       badge: `${paidSubsCount} / ${deacons.length} مسدد`,
       path: '/admin/subscriptions'
+    },
+    {
+      title: 'إدارة المستويات والرتب (User Levels)',
+      desc: 'تحديد نقاط ومسميات الرتب والترقيات لجميع الشمامسة',
+      icon: Award,
+      color: 'bg-amber-600',
+      path: '/admin/levels'
     },
     {
       title: 'إدارة الحسابات والشمامسة',

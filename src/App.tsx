@@ -17,6 +17,7 @@ import { HallOfFame } from './pages/admin/HallOfFame';
 import { ManageAfetqad } from './pages/admin/ManageAfetqad';
 import { ManageNotifications } from './pages/admin/ManageNotifications';
 import { ManageSubscriptions } from './pages/admin/ManageSubscriptions';
+import { ManageLevels } from './pages/admin/ManageLevels';
 import { Profile } from './pages/Profile';
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
               <Route path="/admin/afetqad" element={<ManageAfetqad />} />
               <Route path="/admin/notifications" element={<ManageNotifications />} />
               <Route path="/admin/subscriptions" element={<ManageSubscriptions />} />
+              <Route path="/admin/levels" element={<ManageLevels />} />
               <Route path="/profile" element={<Profile />} />
             </Route>
           </Route>
