@@ -21,8 +21,16 @@ export const Login = () => {
       await login(username, password);
       navigate('/');
     } catch (err: any) {
-      console.error(err);
-      setError('اسم المستخدم أو كلمة المرور غير صحيحة');
+      console.error('Firebase Auth Error:', err);
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setError('اسم المستخدم / البريد أو كلمة المرور غير صحيحة');
+      } else if (err.code === 'auth/too-many-requests') {
+        setError('تم حظر المحاولات مؤقتاً بسبب كثرة المحاولات الخاطئة. يرجى المحاولة لاحقاً.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError('النطاق (Domain) غير مصرح به في Firebase Authentication.');
+      } else {
+        setError(err.message || 'حدث خطأ أثناء تسجيل الدخول');
+      }
     } finally {
       setLoading(false);
     }
@@ -50,7 +58,7 @@ export const Login = () => {
             
             <div>
               <label htmlFor="username" className="block text-sm font-medium text-slate-700">
-                اسم المستخدم
+                اسم المستخدم أو البريد الإلكتروني
               </label>
               <div className="mt-1">
                 <input
@@ -59,6 +67,7 @@ export const Login = () => {
                   type="text"
                   required
                   dir="ltr"
+                  placeholder="admin أو user@domain.com"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="appearance-none block w-full px-3 py-3 border border-slate-300 rounded-xl shadow-sm placeholder-slate-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-left"

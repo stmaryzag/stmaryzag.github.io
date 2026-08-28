@@ -60,8 +60,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return unsubscribe;
   }, []);
 
-  const login = async (username: string, password: string) => {
-    const email = `${username}@deacons-app.local`;
+  const login = async (usernameOrEmail: string, password: string) => {
+    const trimmed = usernameOrEmail.trim();
+    // If it already contains an '@' (like admin@gmail.com), use it directly.
+    // Otherwise, append the default domain.
+    const email = trimmed.includes('@') ? trimmed : `${trimmed}@deacons-app.local`;
     await signInWithEmailAndPassword(auth, email, password);
   };
 
