@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -22,7 +22,7 @@ export const ParentDashboard = () => {
     const childRef = doc(db, 'users', userData.parentOfDeaconId);
     getDoc(childRef).then(snap => {
       if (snap.exists()) {
-        const data = { id: snap.id, ...snap.data() };
+        const data: any = { id: snap.id, ...snap.data() };
         setChildData(data);
         
         // Fetch Child's Team Info

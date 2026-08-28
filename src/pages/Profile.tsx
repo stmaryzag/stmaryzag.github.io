@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { User, Phone, Shield, Lock, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { updatePassword } from 'firebase/auth';

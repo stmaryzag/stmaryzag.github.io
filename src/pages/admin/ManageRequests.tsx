@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, addDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -16,7 +16,7 @@ export const ManageRequests = () => {
     // 1. Fetch pending requests
     const q = query(collection(db, 'registration_requests'), where('status', '==', 'pending'));
     const unsub = onSnapshot(q, async (snapshot) => {
-      const reqs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      const reqs: any[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       
       // Filter for assistant if needed
       let filteredReqs = reqs;
@@ -42,7 +42,7 @@ export const ManageRequests = () => {
 
       setUsersInfo(prev => ({ ...prev, ...uInfo }));
       setActivitiesInfo(prev => ({ ...prev, ...aInfo }));
-      setRequests(filteredReqs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+      setRequests(filteredReqs.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()));
     });
 
     return () => unsub();

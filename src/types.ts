@@ -9,7 +9,10 @@ export interface UserData {
   birthDate?: string;
   grade?: string;
   parentPhone?: string;
+  dadPhone?: string;
+  momPhone?: string;
   ownPhone?: string;
+  address?: string;
   areaId?: string;
   assignedAssistantId?: string;
   serviceStartDate?: string;
@@ -18,4 +21,5 @@ export interface UserData {
   lastHomeVisitDate?: string;
   createdAt: string;
   isFirstLogin?: boolean;
+  tempPassword?: string;
 }

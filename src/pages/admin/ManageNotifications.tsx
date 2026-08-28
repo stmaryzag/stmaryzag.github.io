@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, query, orderBy, getDocs, addDoc, updateDoc, doc, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -65,7 +65,7 @@ export const ManageNotifications = () => {
       const q = query(collection(db, 'notifications_scheduled'), where('sent', '==', false), where('sendAt', '<=', now));
       const snap = await getDocs(q);
       
-      const dueNotifications = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const dueNotifications: any[] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       
       if (dueNotifications.length === 0) {
         alert('لا توجد إشعارات مستحقة الإرسال في الوقت الحالي.');
