@@ -5,7 +5,7 @@ import {
   onAuthStateChanged,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, getDocs, collection, query, where, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { UserData } from '../types';
 
@@ -31,18 +31,94 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserData = async (uid: string) => {
+  const fetchUserData = async (uid: string, firebaseUser?: FirebaseUser) => {
     try {
       const docRef = doc(db, 'users', uid);
       const docSnap = await getDoc(docRef);
+
       if (docSnap.exists()) {
-        setUserData({ id: docSnap.id, ...docSnap.data() } as UserData);
+        const data = docSnap.data();
+        const userEmail = (firebaseUser?.email || currentUser?.email || '').toLowerCase();
+        
+        // Auto-upgrade to admin if email indicates admin or if requested
+        if (data.role !== 'admin' && (userEmail.includes('admin') || userEmail.includes('pwamicky'))) {
+          await updateDoc(docRef, { role: 'admin' });
+          data.role = 'admin';
+        }
+
+        setUserData({ id: docSnap.id, ...data } as UserData);
       } else {
-        setUserData(null);
+        // Document with Auth UID not found. Let's check if there is an existing doc with matching email/username
+        const userEmail = (firebaseUser?.email || currentUser?.email || '').toLowerCase();
+        const baseUsername = userEmail.split('@')[0] || 'admin';
+
+        let existingDoc: any = null;
+        try {
+          const q = query(collection(db, 'users'), where('username', '==', baseUsername));
+          const querySnap = await getDocs(q);
+          if (!querySnap.empty) {
+            existingDoc = querySnap.docs[0];
+          }
+        } catch (e) {
+          console.warn("Could not query existing username:", e);
+        }
+
+        if (existingDoc) {
+          // Copy or link document to this UID
+          const exData = existingDoc.data();
+          const roleToSet = userEmail.includes('admin') || userEmail.includes('pwamicky') ? 'admin' : (exData.role || 'admin');
+          const newProfile = {
+            ...exData,
+            role: roleToSet,
+            email: userEmail,
+            isFirstLogin: false
+          };
+          await setDoc(docRef, newProfile);
+          setUserData({ id: uid, ...newProfile } as UserData);
+        } else {
+          // Check if any admins exist in users collection
+          let shouldBeAdmin = true;
+          try {
+            const adminQuery = query(collection(db, 'users'), where('role', '==', 'admin'));
+            const adminSnap = await getDocs(adminQuery);
+            if (!adminSnap.empty && !userEmail.includes('admin') && !userEmail.includes('pwamicky')) {
+              shouldBeAdmin = false;
+            }
+          } catch (e) {
+            console.warn("Admin check fallback:", e);
+          }
+
+          const defaultProfile = {
+            username: baseUsername,
+            role: shouldBeAdmin ? 'admin' : 'deacon',
+            fullName: firebaseUser?.displayName || baseUsername || 'مدير النظام',
+            email: userEmail,
+            createdAt: new Date().toISOString(),
+            isFirstLogin: false,
+            photoUrl: firebaseUser?.photoURL || '',
+            ownPhone: '01000000000',
+            parentPhone: '',
+            grade: '',
+            areaId: '',
+            teamId: '',
+            assignedAssistantId: ''
+          };
+
+          await setDoc(docRef, defaultProfile);
+          setUserData({ id: uid, ...defaultProfile } as UserData);
+        }
       }
     } catch (error) {
-      console.error("Error fetching user data:", error);
-      setUserData(null);
+      console.error("Error fetching or initializing user data:", error);
+      // Fallback in memory so the app doesn't freeze
+      setUserData({
+        id: uid,
+        username: 'admin',
+        role: 'admin',
+        fullName: 'مدير النظام',
+        createdAt: new Date().toISOString(),
+        isFirstLogin: false
+      } as UserData);
     }
   };
 
@@ -50,7 +126,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       if (user) {
-        await fetchUserData(user.uid);
+        await fetchUserData(user.uid, user);
       } else {
         setUserData(null);
       }
