@@ -23,3 +23,39 @@ export interface UserData {
   isFirstLogin?: boolean;
   tempPassword?: string;
 }
+
+export interface SubscriptionRecord {
+  id?: string;
+  deaconId: string;
+  deaconName?: string;
+  monthKey: string; // e.g. "2026-08"
+  year: number;
+  month: number;
+  amount: number; // 30 EGP
+  paid: boolean;
+  paidAt?: string;
+  recordedBy?: string;
+  recordedByName?: string;
+  notes?: string;
+}
+
+export interface ActivityType {
+  id: string;
+  name: string;
+  defaultPoints: number;
+  requiresApproval: boolean;
+  active: boolean;
+  icon?: string;
+  category?: 'liturgy' | 'confession' | 'hymns' | 'service' | 'other';
+}
+
+export interface PointLog {
+  id?: string;
+  deaconId: string;
+  reason: string;
+  points: number;
+  date: string;
+  addedBy: string;
+  monthKey: string;
+  activityTypeId?: string;
+}

@@ -2,25 +2,39 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Star, History, Trophy, User } from 'lucide-react';
+import { 
+  Star, History, Trophy, User, CreditCard, CheckCircle2, 
+  AlertCircle, Phone, Award, Shield, HeartHandshake, Sparkles
+} from 'lucide-react';
 import clsx from 'clsx';
+import { SubscriptionRecord } from '../../types';
+
+const MONTH_NAMES_AR = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+];
 
 export const ParentDashboard = () => {
   const { userData } = useAuth();
   
   const [childData, setChildData] = useState<any>(null);
+  const [assistantData, setAssistantData] = useState<any>(null);
   const [pointsLog, setPointsLog] = useState<any[]>([]);
   const [team, setTeam] = useState<any>(null);
+  const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
   
-  // Current month key (YYYY-MM)
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const now = new Date();
+  const currentMonthNum = now.getMonth() + 1;
+  const currentMonthName = MONTH_NAMES_AR[now.getMonth()];
+  const currentYear = now.getFullYear();
+  const currentMonthKey = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
 
   useEffect(() => {
     if (!userData?.parentOfDeaconId) return;
 
     // Fetch Child User Data
     const childRef = doc(db, 'users', userData.parentOfDeaconId);
-    getDoc(childRef).then(snap => {
+    getDoc(childRef).then(async snap => {
       if (snap.exists()) {
         const data: any = { id: snap.id, ...snap.data() };
         setChildData(data);
@@ -31,6 +45,23 @@ export const ParentDashboard = () => {
             if (docSnap.exists()) setTeam({ id: docSnap.id, ...docSnap.data() });
           });
         }
+
+        // Fetch Assistant Info if assigned
+        if (data.assignedAssistantId) {
+          getDoc(doc(db, 'users', data.assignedAssistantId)).then((docSnap) => {
+            if (docSnap.exists()) setAssistantData({ id: docSnap.id, ...docSnap.data() });
+          });
+        }
+      }
+    });
+
+    // Fetch Subscription status for current month
+    const subDocId = `${userData.parentOfDeaconId}_${currentMonthKey}`;
+    const unsubSub = onSnapshot(doc(db, 'subscriptions', subDocId), (docSnap) => {
+      if (docSnap.exists()) {
+        setSubscription(docSnap.data() as SubscriptionRecord);
+      } else {
+        setSubscription(null);
       }
     });
 
@@ -43,88 +74,193 @@ export const ParentDashboard = () => {
     });
 
     return () => {
+      unsubSub();
       unsubPoints();
     };
-  }, [userData]);
+  }, [userData, currentMonthKey]);
 
   if (!userData?.parentOfDeaconId) {
     return (
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 text-center min-h-[40vh] flex flex-col items-center justify-center">
-        <h2 className="text-lg font-bold text-slate-800 mb-2">لم يتم ربط حسابك بشماس</h2>
-        <p className="text-slate-500 text-sm">يرجى التواصل مع الإدارة لربط حسابك بحساب ابنك.</p>
+      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 text-center min-h-[40vh] flex flex-col items-center justify-center">
+        <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mb-3 text-slate-400">
+          <User className="w-7 h-7" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-800 mb-1">لم يتم ربط حسابك بشماس</h2>
+        <p className="text-slate-500 text-xs">يرجى التواصل مع إدارة الخورس لربط حسابك بابنك الشماس للمتابعة المستمرة.</p>
       </div>
     );
   }
 
   if (!childData) {
     return (
-      <div className="flex items-center justify-center p-12 text-slate-500">جاري التحميل...</div>
+      <div className="flex items-center justify-center p-12 text-slate-500 text-sm">
+        جاري تحميل بيانات ابنك الشماس...
+      </div>
     );
   }
 
   const currentMonthPoints = pointsLog
-    .filter(log => log.monthKey === currentMonth)
+    .filter(log => log.monthKey === currentMonthKey)
     .reduce((acc, curr) => acc + (curr.points || 0), 0);
 
+  const totalPoints = pointsLog.reduce((acc, curr) => acc + (curr.points || 0), 0);
+
   return (
-    <div className="space-y-6">
-      {/* Read-Only Header */}
-      <div className="bg-blue-50 border border-blue-100 p-4 rounded-3xl flex items-center justify-center text-blue-700 text-sm font-bold text-center">
-        وضع المشاهدة (حساب ولي أمر)
+    <div className="space-y-5 max-w-4xl mx-auto pb-6">
+      {/* Reassurance Header */}
+      <div className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white p-5 rounded-3xl shadow-md flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-white/20 rounded-2xl">
+            <HeartHandshake className="w-6 h-6 text-blue-100" />
+          </div>
+          <div>
+            <h2 className="font-extrabold text-base">متابعة ولي الأمر • خورس الشمامسة</h2>
+            <p className="text-xs text-blue-100">متابعة نشاط والتزام ابنك الشماس واشتراكاته الشهرية</p>
+          </div>
+        </div>
+        <span className="text-[11px] font-bold px-3 py-1 bg-white/20 rounded-full border border-white/20">
+          حساب ولي أمر
+        </span>
       </div>
 
-      {/* Child Profile & Score Section */}
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-5">
-        {childData?.photoUrl ? (
-          <img src={childData.photoUrl} alt="Profile" className="w-20 h-20 rounded-full object-cover border-4 border-slate-50 shadow-sm" />
-        ) : (
-          <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center shrink-0 border-4 border-slate-50">
-            <User className="w-8 h-8 text-slate-400" />
+      {/* Child Profile Card */}
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center gap-6 justify-between">
+        <div className="flex flex-col sm:flex-row items-center gap-4 text-center sm:text-right">
+          {childData?.photoUrl ? (
+            <img src={childData.photoUrl} alt="Profile" className="w-22 h-22 rounded-full object-cover border-4 border-blue-50 shadow-md" />
+          ) : (
+            <div className="w-22 h-22 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl font-bold border-4 border-blue-100">
+              {childData?.fullName?.charAt(0) || 'ش'}
+            </div>
+          )}
+          <div>
+            <div className="flex items-center justify-center sm:justify-start gap-2">
+              <h2 className="text-xl font-extrabold text-slate-800">{childData?.fullName}</h2>
+              {childData?.grade && (
+                <span className="text-[10px] font-bold px-2.5 py-0.5 bg-slate-100 text-slate-600 rounded-md">
+                  {childData.grade}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-1 font-mono">@{childData?.username}</p>
+            {assistantData && (
+              <p className="text-xs text-blue-700 font-medium mt-1 flex items-center gap-1">
+                <span>الخادم المساعد المسؤول:</span>
+                <strong className="text-slate-800">{assistantData.fullName}</strong>
+                {assistantData.ownPhone && (
+                  <a href={`tel:${assistantData.ownPhone}`} className="text-blue-600 font-mono text-[11px] mr-1">
+                    ({assistantData.ownPhone})
+                  </a>
+                )}
+              </p>
+            )}
           </div>
-        )}
-        <div className="flex-1">
-          <h2 className="text-xl font-bold text-slate-800">{childData?.fullName}</h2>
-          <div className="flex items-center gap-1 mt-2 text-blue-600 font-bold bg-blue-50 w-max px-3 py-1 rounded-xl">
-            <Star className="w-4 h-4 fill-blue-600" />
-            <span className="text-lg">{currentMonthPoints}</span>
-            <span className="text-xs font-normal text-blue-500 ml-1">نقطة (هذا الشهر)</span>
+        </div>
+
+        {/* Points Display */}
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-50/80 px-4 py-3 rounded-2xl border border-blue-100 text-center">
+            <span className="text-[10px] font-bold text-blue-600 block">نقاط شهر {currentMonthName}</span>
+            <span className="text-2xl font-black text-blue-700">{currentMonthPoints}</span>
           </div>
+          <div className="bg-amber-50/80 px-4 py-3 rounded-2xl border border-amber-100 text-center">
+            <span className="text-[10px] font-bold text-amber-700 block">الإجمالي الكلي</span>
+            <span className="text-2xl font-black text-amber-700">{totalPoints}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 💳 MONTHLY SUBSCRIPTION STATUS CARD FOR PARENTS (30 EGP) */}
+      <div className={clsx(
+        "p-5 rounded-3xl border shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all",
+        subscription?.paid 
+          ? "bg-gradient-to-r from-emerald-50 via-teal-50/30 to-emerald-50 border-emerald-300 text-emerald-950" 
+          : "bg-gradient-to-r from-amber-50 via-orange-50/40 to-rose-50 border-amber-300 text-amber-950"
+      )}>
+        <div className="flex items-center gap-3.5">
+          <div className={clsx(
+            "w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm",
+            subscription?.paid ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"
+          )}>
+            <CreditCard className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-600">الاشتراك الشهري لابنك ({currentMonthName} {currentYear})</span>
+              <span className="text-xs font-black bg-white px-2 py-0.5 rounded-md border border-slate-200 text-slate-800">30 جنيه</span>
+            </div>
+            {subscription?.paid ? (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <h4 className="font-extrabold text-emerald-800 text-sm">تم سداد الاشتراك بنجاح ✅</h4>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <AlertCircle className="w-4 h-4 text-amber-600" />
+                <h4 className="font-extrabold text-amber-900 text-sm">في انتظار سداد اشتراك الشهر (30 جنيه)</h4>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="text-xs font-medium text-slate-600 bg-white/90 px-4 py-2.5 rounded-2xl border border-slate-200">
+          {subscription?.paid ? (
+            <div>
+              <p className="text-emerald-700 font-bold">تاريخ السداد: {subscription.paidAt ? new Date(subscription.paidAt).toLocaleDateString('ar-EG') : 'مسجل'}</p>
+              <p className="text-[10px] text-slate-500">تم السداد للخادم: {subscription.recordedByName || 'المسؤول'}</p>
+            </div>
+          ) : (
+            <p className="text-amber-800 font-medium">يمكنكم تسليم مبلغ الـ 30 جنيه مع ابنك للخادم المساعد المسؤول عنه بالخورس</p>
+          )}
         </div>
       </div>
 
       {/* Team Progress */}
       {team && (
-        <div className="bg-gradient-to-l from-purple-600 to-purple-500 p-6 rounded-3xl shadow-sm text-white flex items-center justify-between">
-          <div>
-            <p className="text-purple-100 text-sm font-medium mb-1">فريق ابنك: {team.name}</p>
-            <div className="flex items-center gap-2 font-bold text-2xl">
+        <div className="bg-gradient-to-r from-purple-700 to-indigo-800 p-5 rounded-3xl shadow-sm text-white flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-white/20 rounded-2xl">
               <Trophy className="w-6 h-6 text-yellow-300" />
-              <span>{team.teamMonthlyPoints || 0} نقطة إجمالية</span>
             </div>
+            <div>
+              <p className="text-purple-200 text-xs font-medium">فريق ابنك في الخورس</p>
+              <h3 className="text-lg font-bold">{team.name}</h3>
+            </div>
+          </div>
+          <div className="text-left font-mono">
+            <span className="text-2xl font-black text-yellow-300">{team.teamMonthlyPoints || 0}</span>
+            <span className="text-xs text-purple-200 mr-1">نقطة</span>
           </div>
         </div>
       )}
 
       {/* Points History */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-        <div className="flex items-center gap-2 mb-6">
-          <History className="w-5 h-5 text-slate-400" />
-          <h3 className="font-bold text-slate-800">سجل النشاط لابنك</h3>
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <History className="w-5 h-5 text-slate-400" />
+            <h3 className="font-extrabold text-slate-800 text-sm">سجل التزام ونشاط ابنك</h3>
+          </div>
+          <span className="text-xs text-slate-400 font-mono">{pointsLog.length} نشاط مسجل</span>
         </div>
-        <div className="space-y-4">
+
+        <div className="space-y-3">
           {pointsLog.slice(0, 10).map((log, idx) => (
-            <div key={log.id || idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
+            <div key={log.id || idx} className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-100">
               <div>
-                <p className="font-bold text-slate-800">{log.reason}</p>
-                <p className="text-xs text-slate-500 mt-1">{new Date(log.date).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                <p className="font-bold text-slate-800 text-xs">{log.reason}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  {new Date(log.date).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })}
+                </p>
               </div>
-              <div className={clsx("font-bold text-lg px-3 py-1 rounded-xl", log.points > 0 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700")}>
+              <div className={clsx("font-bold text-xs px-3 py-1 rounded-xl font-mono", log.points > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
                 {log.points > 0 ? '+' : ''}{log.points}
               </div>
             </div>
           ))}
+
           {pointsLog.length === 0 && (
-            <p className="text-center text-slate-500 text-sm py-4">لا يوجد نشاط مسجل حتى الآن.</p>
+            <p className="text-center text-slate-400 text-xs py-4">لا يوجد نشاط مسجل حتى الآن.</p>
           )}
         </div>
       </div>

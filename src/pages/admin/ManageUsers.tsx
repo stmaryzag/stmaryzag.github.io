@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, setDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { createAuthUser } from '../../lib/adminAuth';
 import { 
   Users, Plus, Loader2, User, Search, Edit3, CheckCircle, 
-  AlertCircle, Download, Phone, MapPin, Calendar
+  AlertCircle, Download, Phone, MapPin, Calendar, FileSpreadsheet,
+  UploadCloud, Copy, Check, ShieldCheck
 } from 'lucide-react';
 import { Role, UserData } from '../../types';
+import { parseExcelFile, ParsedDeaconRow } from '../../utils/excelImport';
 
 export const ManageUsers = () => {
   const [users, setUsers] = useState<UserData[]>([]);
@@ -28,6 +30,18 @@ export const ManageUsers = () => {
   // Edit user state
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+
+  // Excel Bulk Import Modal State
+  const [showExcelModal, setShowExcelModal] = useState(false);
+  const [parsedRows, setParsedRows] = useState<ParsedDeaconRow[]>([]);
+  const [excelFileName, setExcelFileName] = useState('');
+  const [parsingExcel, setParsingExcel] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [importLogs, setImportLogs] = useState<string[]>([]);
+  const [importFinished, setImportFinished] = useState(false);
+  const [copiedCredentials, setCopiedCredentials] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
@@ -140,6 +154,104 @@ export const ManageUsers = () => {
     }
   };
 
+  // Handle Excel File Pick & Parsing locally in memory
+  const handleExcelFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setParsingExcel(true);
+    setError('');
+    setExcelFileName(file.name);
+    setImportLogs([]);
+    setImportFinished(false);
+
+    try {
+      const parsed = await parseExcelFile(file);
+      if (parsed.length === 0) {
+        throw new Error('لم يتم العثور على أي صفوف صالحة في ملف الإكسيل');
+      }
+      setParsedRows(parsed);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'فشل في قراءة ملف الإكسيل');
+    } finally {
+      setParsingExcel(false);
+    }
+  };
+
+  // Perform Bulk Account Creation in Firebase directly
+  const handleStartBulkImport = async () => {
+    if (parsedRows.length === 0) return;
+    setImporting(true);
+    setImportProgress({ current: 0, total: parsedRows.length });
+    const logs: string[] = [];
+
+    for (let i = 0; i < parsedRows.length; i++) {
+      const row = parsedRows[i];
+      const email = `${row.username}@deacons-app.local`;
+
+      try {
+        let uid = '';
+        try {
+          const authUser = await createAuthUser(email, row.password);
+          uid = authUser.uid;
+        } catch (authErr: any) {
+          if (authErr.code === 'auth/email-already-in-use') {
+            // Already created, we will update doc or create doc with email prefix
+            uid = `uid_${row.username.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            logs.push(`⚠️ ${row.fullName}: الحساب مسجل بالفعل مسبقاً، جاري تحديث بياناته.`);
+          } else {
+            throw authErr;
+          }
+        }
+
+        // Save in Firestore
+        await setDoc(doc(db, 'users', uid || `uid_${row.username}`), {
+          fullName: row.fullName,
+          username: row.username,
+          tempPassword: row.password,
+          birthDate: row.birthDate,
+          ownPhone: row.ownPhone,
+          dadPhone: row.dadPhone,
+          momPhone: row.momPhone,
+          parentPhone: row.parentPhone,
+          address: row.address,
+          grade: row.grade,
+          role: 'deacon',
+          isFirstLogin: true,
+          photoUrl: '',
+          areaId: '',
+          teamId: '',
+          assignedAssistantId: '',
+          createdAt: new Date().toISOString()
+        }, { merge: true });
+
+        logs.push(`✅ ${row.fullName} (@${row.username}) -> تم الإنشاء والحفظ بنجاح`);
+      } catch (err: any) {
+        logs.push(`❌ ${row.fullName}: فشل الإنشاء (${err.message})`);
+      }
+
+      setImportProgress({ current: i + 1, total: parsedRows.length });
+      setImportLogs([...logs]);
+    }
+
+    setImporting(false);
+    setImportFinished(true);
+    setSuccessMsg(`تم الانتهاء من إنشاء ${parsedRows.length} حساب في Firebase بنجاح!`);
+  };
+
+  // Copy Generated Passwords to Clipboard
+  const handleCopyCredentials = () => {
+    const text = parsedRows.map((r, idx) => 
+      `${idx + 1}. ${r.fullName}\n   - اسم الدخول: ${r.username}\n   - كلمة المرور: ${r.password}\n   - الهاتف: ${r.ownPhone || 'غير مسجل'}`
+    ).join('\n\n');
+
+    navigator.clipboard.writeText(text);
+    setCopiedCredentials(true);
+    setTimeout(() => setCopiedCredentials(false), 3000);
+  };
+
+  // Download CSV of Current DB Users
   const downloadCSV = () => {
     const header = "الاسم,اسم الدخول,الرتبة,الهاتف,هاتف الوالدين,تاريخ الميلاد,العنوان,الصف الدراسي\n";
     const rows = users.map(u => 
@@ -151,6 +263,23 @@ export const ManageUsers = () => {
     const link = document.createElement("a");
     link.setAttribute("href", url);
     link.setAttribute("download", `تقرير_بيانات_الشمامسة_${new Date().toLocaleDateString('ar-EG')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Download CSV of Imported Credentials
+  const downloadImportedCredentialsCSV = () => {
+    const header = "الاسم,اسم الدخول,كلمة المرور المبدئية,رقم الشماس,رقم الاب,رقم الام,العنوان,الصف\n";
+    const rows = parsedRows.map(r => 
+      `"${r.fullName}","${r.username}","${r.password}","${r.ownPhone}","${r.dadPhone}","${r.momPhone}","${(r.address || '').replace(/"/g, '""')}","${r.grade}"`
+    ).join("\n");
+
+    const blob = new Blob(["\uFEFF" + header + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `بيانات_دخول_الشمامسة_${new Date().toLocaleDateString('ar-EG')}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -198,18 +327,26 @@ export const ManageUsers = () => {
           <div>
             <h2 className="text-xl font-bold text-slate-800">إدارة حسابات الشمامسة والمستخدمين</h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              إجمالي الحسابات المسجلة بقاعدة البيانات: <span className="font-bold text-blue-600">{users.length}</span>
+              إجمالي الحسابات المسجلة في Firebase: <span className="font-bold text-blue-600">{users.length}</span>
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
           <button
+            onClick={() => setShowExcelModal(true)}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-sm"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            استيراد ملف Excel من جهازك
+          </button>
+
+          <button
             onClick={downloadCSV}
             className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors"
           >
             <Download className="w-4 h-4" />
-            تصدير البيانات (Excel/CSV)
+            تصدير البيانات (CSV)
           </button>
 
           <button
@@ -217,7 +354,7 @@ export const ManageUsers = () => {
             className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            إضافة حساب جديد
+            إضافة حساب يدوي
           </button>
         </div>
       </div>
@@ -233,6 +370,28 @@ export const ManageUsers = () => {
         <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl text-sm flex items-center gap-2">
           <CheckCircle className="w-5 h-5 shrink-0" />
           <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* Empty State Helper Card */}
+      {users.length === 0 && !loading && (
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50/40 p-6 md:p-8 rounded-3xl border border-blue-100 text-center space-y-4">
+          <div className="w-16 h-16 bg-white shadow-sm rounded-2xl flex items-center justify-center mx-auto text-blue-600 border border-blue-100">
+            <UploadCloud className="w-8 h-8" />
+          </div>
+          <div className="max-w-md mx-auto">
+            <h3 className="text-lg font-bold text-slate-800 mb-1">لا توجد حسابات مسجلة بعد في قاعدة البيانات</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              يمكنك رفع ملف الإكسيل الخاص بالشمامسة مباشرة من حاسوبك، وسيقوم المتصفح بقراءته وإنشاء الحسابات وتوليد كلمات المرور في Firebase فوراً وبشكل آمن تماماً بدون حفظ الملف على السيرفر.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowExcelModal(true)}
+            className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl text-sm shadow-md transition-all"
+          >
+            <FileSpreadsheet className="w-5 h-5" />
+            اختيار ملف Excel لإنشاء حسابات الشمامسة الآن
+          </button>
         </div>
       )}
 
@@ -314,32 +473,34 @@ export const ManageUsers = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center gap-3">
-        <div className="relative flex-1 w-full">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="بحث بالاسم، اسم المستخدم، الهاتف، العنوان..."
-            className="w-full pl-4 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500"
-          />
-          <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3" />
-        </div>
+      {users.length > 0 && (
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="بحث بالاسم، اسم المستخدم، الهاتف، العنوان..."
+              className="w-full pl-4 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500"
+            />
+            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3" />
+          </div>
 
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <select
-            value={roleFilter}
-            onChange={e => setRoleFilter(e.target.value)}
-            className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:border-blue-500"
-          >
-            <option value="all">كل الأدوار</option>
-            <option value="deacon">الشمامسة فقط</option>
-            <option value="assistant">المساعدين</option>
-            <option value="parent">أولياء الأمور</option>
-            <option value="admin">المدراء (Admins)</option>
-          </select>
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            <select
+              value={roleFilter}
+              onChange={e => setRoleFilter(e.target.value)}
+              className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">كل الأدوار</option>
+              <option value="deacon">الشمامسة فقط</option>
+              <option value="assistant">المساعدين</option>
+              <option value="parent">أولياء الأمور</option>
+              <option value="admin">المدراء (Admins)</option>
+            </select>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Users Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -416,11 +577,188 @@ export const ManageUsers = () => {
         })}
       </div>
 
-      {filteredUsers.length === 0 && (
-        <div className="text-center py-12 bg-white rounded-3xl border border-slate-100 text-slate-500">
-          <Users className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-          <p className="font-bold text-slate-700 mb-1">لا توجد حسابات مسجلة</p>
-          <p className="text-xs text-slate-400">يمكنك الضغط على زر "إضافة حساب جديد" لإنشاء مستخدم</p>
+      {/* Excel Bulk Import Modal */}
+      {showExcelModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 md:p-8 space-y-5 my-8 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
+                  <FileSpreadsheet className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-lg">استيراد وإنشاء حسابات الشمامسة من Excel</h3>
+                  <p className="text-xs text-slate-500">
+                    قراءة الملف تتم محلياً في متصفحك ورفع الحسابات لـ Firebase دون حفظ الملف في الـ Repo
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowExcelModal(false);
+                  setParsedRows([]);
+                  setExcelFileName('');
+                  setImportFinished(false);
+                }}
+                className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Drop / Pick Zone */}
+            <div 
+              onClick={() => excelInputRef.current?.click()}
+              className="border-2 border-dashed border-emerald-300 hover:border-emerald-500 rounded-2xl p-6 text-center cursor-pointer bg-emerald-50/40 transition-colors"
+            >
+              <input 
+                type="file" 
+                ref={excelInputRef} 
+                onChange={handleExcelFileSelect} 
+                accept=".xlsx, .xls, .csv" 
+                className="hidden" 
+              />
+              <UploadCloud className="w-10 h-10 text-emerald-600 mx-auto mb-2" />
+              {excelFileName ? (
+                <div>
+                  <p className="text-sm font-bold text-emerald-800">{excelFileName}</p>
+                  <p className="text-xs text-emerald-600 mt-1">اضغط لاختيار ملف آخر</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm font-bold text-slate-800">اضغط هنا لاختيار ملف الإكسيل (.xlsx / .xls)</p>
+                  <p className="text-xs text-slate-500 mt-1">يتعرف النظام تلقائياً على أعمدة: الاسم، رقم الشماس، هاتف الأب، تاريخ الميلاد، العنوان، الصف</p>
+                </div>
+              )}
+            </div>
+
+            {/* Parsing Indicator */}
+            {parsingExcel && (
+              <div className="flex items-center justify-center gap-2 text-emerald-700 py-3 text-sm font-bold">
+                <Loader2 className="w-5 h-5 animate-spin" /> جاري قراءة وتجهيز البيانات وتوليد الحسابات...
+              </div>
+            )}
+
+            {/* Preview Table of Extracted Deacons */}
+            {parsedRows.length > 0 && !importFinished && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">
+                    تم استخراج <span className="text-emerald-600 font-extrabold">{parsedRows.length}</span> شماس جاهز للإنشاء:
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    تم توليد أسماء دخول وكلمات مرور عشوائية
+                  </span>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-2xl">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 text-slate-600 sticky top-0 border-b">
+                      <tr>
+                        <th className="p-2.5">#</th>
+                        <th className="p-2.5">الاسم</th>
+                        <th className="p-2.5">اسم الدخول</th>
+                        <th className="p-2.5">كلمة السر المبدئية</th>
+                        <th className="p-2.5">الهاتف</th>
+                        <th className="p-2.5">الصف</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {parsedRows.map((r, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-2.5 text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="p-2.5 font-bold text-slate-800">{r.fullName}</td>
+                          <td className="p-2.5 font-mono text-blue-600" dir="ltr">{r.username}</td>
+                          <td className="p-2.5 font-mono text-emerald-700 bg-emerald-50/50" dir="ltr">{r.password}</td>
+                          <td className="p-2.5 text-slate-600" dir="ltr">{r.ownPhone || r.dadPhone || '-'}</td>
+                          <td className="p-2.5 text-slate-500">{r.grade || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Progress Bar during Import */}
+                {importing && (
+                  <div className="space-y-2 pt-2">
+                    <div className="flex justify-between text-xs font-bold text-slate-700">
+                      <span>جاري إنشاء الحسابات في Firebase...</span>
+                      <span>{importProgress.current} / {importProgress.total}</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                      <div 
+                        className="bg-emerald-600 h-2.5 rounded-full transition-all duration-300"
+                        style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Finished Import State */}
+            {importFinished && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-100 text-emerald-700 rounded-full">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-emerald-900 text-sm">تم إنشاء وتفعيل الحسابات بنجاح!</h4>
+                    <p className="text-xs text-emerald-700">
+                      تم حفظ كل البيانات في Firebase Auth و Firestore. يمكنك الآن نسخ أو تنزيل بيانات الدخول لتسليمها للشمامسة.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button
+                    onClick={handleCopyCredentials}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-colors"
+                  >
+                    {copiedCredentials ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    {copiedCredentials ? 'تم النسخ للحافظة!' : 'نسخ قائمة الحسابات وكلمات المرور'}
+                  </button>
+
+                  <button
+                    onClick={downloadImportedCredentialsCSV}
+                    className="px-4 py-2.5 bg-white border border-emerald-300 hover:bg-emerald-100/50 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    تنزيل ملف بيانات الدخول (Excel/CSV)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowExcelModal(false);
+                  setParsedRows([]);
+                  setExcelFileName('');
+                  setImportFinished(false);
+                }}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"
+              >
+                {importFinished ? 'إغلاق' : 'إلغاء'}
+              </button>
+
+              {parsedRows.length > 0 && !importFinished && (
+                <button
+                  type="button"
+                  onClick={handleStartBulkImport}
+                  disabled={importing}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  {importing ? 'جاري الإنشاء...' : `بدء إنشاء وتفعيل الـ ${parsedRows.length} حساب في Firebase`}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

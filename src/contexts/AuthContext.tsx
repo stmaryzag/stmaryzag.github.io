@@ -31,27 +31,53 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Hardened Admin Role check using Firestore 'admin' collection and verified user role
+  const verifyIsAdmin = async (username: string, email: string): Promise<boolean> => {
+    try {
+      // 1. Check doc in 'admin' collection with username
+      const adminDocRef = doc(db, 'admin', username.toLowerCase());
+      const adminDocSnap = await getDoc(adminDocRef);
+      if (adminDocSnap.exists() && adminDocSnap.data()?.role === 'admin') {
+        return true;
+      }
+
+      // 2. Check doc in 'admin' collection with email prefix
+      const emailPrefix = email.split('@')[0].toLowerCase();
+      if (emailPrefix && emailPrefix !== username.toLowerCase()) {
+        const prefixDoc = await getDoc(doc(db, 'admin', emailPrefix));
+        if (prefixDoc.exists() && prefixDoc.data()?.role === 'admin') {
+          return true;
+        }
+      }
+
+      return false;
+    } catch (e) {
+      console.warn("Admin verification check warning:", e);
+      return false;
+    }
+  };
+
   const fetchUserData = async (uid: string, firebaseUser?: FirebaseUser) => {
     try {
       const docRef = doc(db, 'users', uid);
       const docSnap = await getDoc(docRef);
+      const userEmail = (firebaseUser?.email || currentUser?.email || '').toLowerCase();
+      const baseUsername = userEmail.split('@')[0] || 'user';
 
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const userEmail = (firebaseUser?.email || currentUser?.email || '').toLowerCase();
-        
-        // Auto-upgrade to admin if email indicates admin or if requested
-        if (data.role !== 'admin' && (userEmail.includes('admin') || userEmail.includes('pwamicky'))) {
+        let activeRole = data.role || 'deacon';
+
+        // Verify if user is declared in 'admin' collection
+        const isAdminInFirestore = await verifyIsAdmin(data.username || baseUsername, userEmail);
+        if (isAdminInFirestore && activeRole !== 'admin') {
           await updateDoc(docRef, { role: 'admin' });
-          data.role = 'admin';
+          activeRole = 'admin';
         }
 
-        setUserData({ id: docSnap.id, ...data } as UserData);
+        setUserData({ id: docSnap.id, ...data, role: activeRole } as UserData);
       } else {
-        // Document with Auth UID not found. Let's check if there is an existing doc with matching email/username
-        const userEmail = (firebaseUser?.email || currentUser?.email || '').toLowerCase();
-        const baseUsername = userEmail.split('@')[0] || 'admin';
-
+        // Document with Auth UID not found. Let's check if there is an existing doc with matching username
         let existingDoc: any = null;
         try {
           const q = query(collection(db, 'users'), where('username', '==', baseUsername));
@@ -63,10 +89,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           console.warn("Could not query existing username:", e);
         }
 
+        const isAdmin = await verifyIsAdmin(baseUsername, userEmail);
+
         if (existingDoc) {
-          // Copy or link document to this UID
           const exData = existingDoc.data();
-          const roleToSet = userEmail.includes('admin') || userEmail.includes('pwamicky') ? 'admin' : (exData.role || 'admin');
+          const roleToSet = isAdmin ? 'admin' : (exData.role || 'deacon');
           const newProfile = {
             ...exData,
             role: roleToSet,
@@ -76,22 +103,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           await setDoc(docRef, newProfile);
           setUserData({ id: uid, ...newProfile } as UserData);
         } else {
-          // Check if any admins exist in users collection
-          let shouldBeAdmin = true;
+          // Check if system is completely empty (first initialization)
+          let shouldBeAdmin = isAdmin;
           try {
-            const adminQuery = query(collection(db, 'users'), where('role', '==', 'admin'));
-            const adminSnap = await getDocs(adminQuery);
-            if (!adminSnap.empty && !userEmail.includes('admin') && !userEmail.includes('pwamicky')) {
-              shouldBeAdmin = false;
+            const allUsersSnap = await getDocs(collection(db, 'users'));
+            if (allUsersSnap.empty) {
+              shouldBeAdmin = true;
+              // Also bootstrap the admin doc
+              await setDoc(doc(db, 'admin', baseUsername), { role: 'admin', createdAt: new Date().toISOString() });
             }
           } catch (e) {
-            console.warn("Admin check fallback:", e);
+            console.warn("Initial admin bootstrap notice:", e);
           }
 
           const defaultProfile = {
             username: baseUsername,
             role: shouldBeAdmin ? 'admin' : 'deacon',
-            fullName: firebaseUser?.displayName || baseUsername || 'مدير النظام',
+            fullName: firebaseUser?.displayName || baseUsername || (shouldBeAdmin ? 'مدير النظام' : 'شماس'),
             email: userEmail,
             createdAt: new Date().toISOString(),
             isFirstLogin: false,
@@ -110,12 +138,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch (error) {
       console.error("Error fetching or initializing user data:", error);
-      // Fallback in memory so the app doesn't freeze
+      // Secure fallback
       setUserData({
         id: uid,
-        username: 'admin',
-        role: 'admin',
-        fullName: 'مدير النظام',
+        username: 'deacon',
+        role: 'deacon',
+        fullName: 'شماس',
         createdAt: new Date().toISOString(),
         isFirstLogin: false
       } as UserData);
@@ -138,8 +166,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (usernameOrEmail: string, password: string) => {
     const trimmed = usernameOrEmail.trim();
-    // If it already contains an '@' (like admin@gmail.com), use it directly.
-    // Otherwise, append the default domain.
     const email = trimmed.includes('@') ? trimmed : `${trimmed}@deacons-app.local`;
     await signInWithEmailAndPassword(auth, email, password);
   };
