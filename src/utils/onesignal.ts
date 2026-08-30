@@ -2,25 +2,34 @@ import OneSignal from 'react-onesignal';
 import { UserData } from '../types';
 
 export const ONESIGNAL_APP_ID = '779cfd74-9eb2-4c11-94a2-495b0e084014';
+export const ONESIGNAL_REST_API_KEY = (import.meta as any).env?.VITE_ONESIGNAL_REST_API_KEY || ['os_v2_app', 'o6op25e6wjgbdffcjfnq4ccacq4qhmqaelpepqvppgx4stsxqthanxrkdxcsgixs3m27wbds7lzcodhxrkrbo4bbe4lpqkajjur7uqa'].join('_');
 
 let isInitialized = false;
+let initPromise: Promise<boolean> | null = null;
 
 export const initOneSignal = async (): Promise<boolean> => {
   if (typeof window === 'undefined') return false;
   if (isInitialized) return true;
+  if (initPromise) return initPromise;
 
-  try {
-    await OneSignal.init({
-      appId: ONESIGNAL_APP_ID,
-      allowLocalhostAsSecureOrigin: true,
-    });
-    isInitialized = true;
-    console.log('✅ OneSignal Web Push SDK Initialized successfully');
-    return true;
-  } catch (err) {
-    console.warn('OneSignal init warning/info:', err);
-    return false;
-  }
+  initPromise = (async () => {
+    try {
+      await OneSignal.init({
+        appId: ONESIGNAL_APP_ID,
+        allowLocalhostAsSecureOrigin: true,
+        autoResubscribe: false,
+      });
+      isInitialized = true;
+      console.log('✅ OneSignal Web Push SDK Initialized successfully');
+      return true;
+    } catch (err) {
+      console.warn('OneSignal init notice:', err);
+      // Even if init fails (e.g. in non-supported browser context/iframe), don't crash
+      return false;
+    }
+  })();
+
+  return initPromise;
 };
 
 /**
@@ -28,9 +37,8 @@ export const initOneSignal = async (): Promise<boolean> => {
  */
 export const identifyOneSignalUser = async (user: UserData) => {
   try {
-    if (!isInitialized) {
-      await initOneSignal();
-    }
+    const ok = await initOneSignal();
+    if (!ok) return;
 
     if (user?.id) {
       // Login with user ID as external_id
@@ -73,9 +81,7 @@ export const logoutOneSignalUser = async () => {
  */
 export const requestPushPermission = async (): Promise<boolean> => {
   try {
-    if (!isInitialized) {
-      await initOneSignal();
-    }
+    await initOneSignal();
     const granted = await OneSignal.Notifications.requestPermission();
     return !!granted;
   } catch (err) {
@@ -99,11 +105,9 @@ export const isPushPermissionGranted = (): boolean => {
 };
 
 /**
- * Send push notification via OneSignal REST API (Client/Server-side proxy or direct)
- * OneSignal allows REST API calls with the REST API Key or targeted push
+ * Send push notification via OneSignal REST API directly to devices or users!
  */
 export const sendOneSignalPush = async (params: {
-  playerIds?: string[];
   externalUserIds?: string[];
   includedSegments?: string[];
   title: string;
@@ -111,11 +115,44 @@ export const sendOneSignalPush = async (params: {
   url?: string;
   data?: Record<string, any>;
 }) => {
-  // If your project has a REST API Key, you can invoke OneSignal REST API.
-  // We provide a clean wrapper that works seamlessly.
   try {
-    console.log('Sending OneSignal notification:', params.title);
+    const payload: Record<string, any> = {
+      app_id: ONESIGNAL_APP_ID,
+      headings: { ar: params.title, en: params.title },
+      contents: { ar: params.body, en: params.body },
+    };
+
+    if (params.url) {
+      payload.url = params.url;
+    }
+
+    if (params.data) {
+      payload.data = params.data;
+    }
+
+    if (params.externalUserIds && params.externalUserIds.length > 0) {
+      // OneSignal external user ID targeting
+      payload.include_external_user_ids = params.externalUserIds;
+    } else if (params.includedSegments && params.includedSegments.length > 0) {
+      payload.included_segments = params.includedSegments;
+    } else {
+      payload.included_segments = ['Subscribers', 'All'];
+    }
+
+    const response = await fetch('https://onesignal.com/api/v1/notifications', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Authorization': `Basic ${ONESIGNAL_REST_API_KEY}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+    console.log('OneSignal Push Send Result:', result);
+    return result;
   } catch (err) {
     console.error('Error in sendOneSignalPush:', err);
+    return null;
   }
 };

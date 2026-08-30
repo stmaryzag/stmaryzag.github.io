@@ -1,9 +1,10 @@
 import { collection, addDoc, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { UserData } from '../types';
+import { sendOneSignalPush } from './onesignal';
 
 /**
- * Send an inbox notification to a specific user
+ * Send an inbox notification to a specific user and dispatch push notification
  */
 export async function sendDirectNotification(
   userId: string,
@@ -23,6 +24,13 @@ export async function sendDirectNotification(
       read: false,
       isAward
     });
+
+    // Send Web Push Notification to user device via OneSignal REST API
+    sendOneSignalPush({
+      externalUserIds: [userId],
+      title,
+      body
+    }).catch(e => console.warn('Push dispatch warning:', e));
   } catch (err) {
     console.error('Error sending direct notification:', err);
   }

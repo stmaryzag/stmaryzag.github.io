@@ -180,10 +180,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
-    if (userData) {
+    if (userData?.id) {
       identifyOneSignalUser(userData);
     }
-  }, [userData]);
+  }, [userData?.id]);
 
   const logout = async () => {
     setLoading(true);
