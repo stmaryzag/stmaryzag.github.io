@@ -102,7 +102,7 @@ export const PushNotificationBanner: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-indigo-100/90 mt-1 leading-relaxed max-w-xl">
-              اضغط على "تفعيل الإشعارات" لتصلك تنبيهات سداد الاشتراكات (30ج)، نقاط الأنشطة، وتنبيهات الخورس في شريط إشعارات هاتفك مباشرة.
+              فعل الاشعارات لتعرف كل ما يخص تطبيق الشمامسة والمسابقة الخاصة به أ/ مايكل نبيل
             </p>
             {errorMsg && (
               <p className="text-xs text-rose-300 font-bold mt-2 bg-rose-500/20 p-2 rounded-lg border border-rose-500/30">
