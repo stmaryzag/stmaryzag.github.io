@@ -18,6 +18,8 @@ export const initOneSignal = async (): Promise<boolean> => {
         appId: ONESIGNAL_APP_ID,
         allowLocalhostAsSecureOrigin: true,
         autoResubscribe: false,
+        serviceWorkerPath: 'OneSignalSDKWorker.js',
+        serviceWorkerParam: { scope: '/' },
       });
       isInitialized = true;
       console.log('✅ OneSignal Web Push SDK Initialized successfully');

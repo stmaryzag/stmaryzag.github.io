@@ -5,7 +5,7 @@ import './index.css';
 import { registerSW } from 'virtual:pwa-register';
 
 // Register PWA Service Worker for offline capability & mobile installability
-registerSW({ immediate: true });
+registerSW({ immediate: false });
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
