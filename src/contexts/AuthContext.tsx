@@ -8,6 +8,7 @@ import {
 import { doc, getDoc, setDoc, getDocs, collection, query, where, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { UserData } from '../types';
+import { identifyOneSignalUser, logoutOneSignalUser } from '../utils/onesignal';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -178,8 +179,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  useEffect(() => {
+    if (userData) {
+      identifyOneSignalUser(userData);
+    }
+  }, [userData]);
+
   const logout = async () => {
     setLoading(true);
+    await logoutOneSignalUser();
     await signOut(auth);
     setCurrentUser(null);
     setUserData(null);

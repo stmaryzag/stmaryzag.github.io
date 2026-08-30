@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -20,8 +21,13 @@ import { ManageSubscriptions } from './pages/admin/ManageSubscriptions';
 import { ManageLevels } from './pages/admin/ManageLevels';
 import { FastAttendance } from './pages/admin/FastAttendance';
 import { Profile } from './pages/Profile';
+import { initOneSignal } from './utils/onesignal';
 
 export default function App() {
+  useEffect(() => {
+    initOneSignal();
+  }, []);
+
   return (
     <Router>
       <AuthProvider>

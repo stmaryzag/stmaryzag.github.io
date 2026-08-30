@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { PushNotificationBanner } from '../notifications/PushNotificationBanner';
 
 export const AppLayout = () => {
   const { userData, logout } = useAuth();
@@ -103,6 +104,7 @@ export const AppLayout = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto pb-24 md:pb-8 p-4 sm:p-6 max-w-7xl w-full mx-auto">
+        <PushNotificationBanner />
         <Outlet />
       </main>
 
