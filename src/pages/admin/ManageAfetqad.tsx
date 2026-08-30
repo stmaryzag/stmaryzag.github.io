@@ -8,9 +8,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { 
   Phone, Home, Loader2, Users, CheckCircle2, RefreshCcw, 
   UserX, ShieldAlert, Sparkles, Filter, Search, Check, Clock,
-  ArrowRight, PhoneCall, AlertTriangle
+  ArrowRight, PhoneCall, AlertTriangle, Save, Settings
 } from 'lucide-react';
 import { UserData } from '../../types';
+import { subscribeSystemSettings, updateSystemSettings } from '../../utils/systemSettings';
 
 export const ManageAfetqad = () => {
   const { userData } = useAuth();
@@ -22,6 +23,12 @@ export const ManageAfetqad = () => {
   const [assignments, setAssignments] = useState<any[]>([]);
   const [deacons, setDeacons] = useState<UserData[]>([]);
   
+  // Afteqad Points Configuration
+  const [afteqadCallPoints, setAfteqadCallPoints] = useState<number>(50);
+  const [customAfteqadInput, setCustomAfteqadInput] = useState<string>('50');
+  const [savingPointsSetting, setSavingPointsSetting] = useState<boolean>(false);
+  const [settingSavedMsg, setSettingSavedMsg] = useState<string>('');
+
   // Absent deacons selection for the current week
   const [absentIds, setAbsentIds] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -47,6 +54,36 @@ export const ManageAfetqad = () => {
   useEffect(() => {
     fetchInitialData();
   }, [activeTab]);
+
+  // Subscribe to system settings
+  useEffect(() => {
+    const unsub = subscribeSystemSettings((cfg) => {
+      setAfteqadCallPoints(cfg.afteqadCallPoints ?? 50);
+      setCustomAfteqadInput(String(cfg.afteqadCallPoints ?? 50));
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSaveAfteqadPoints = async (pointsValue: number) => {
+    if (isNaN(pointsValue) || pointsValue < 0) {
+      alert('يرجى إدخال عدد نقاط صحيح وموجب.');
+      return;
+    }
+    setSavingPointsSetting(true);
+    setSettingSavedMsg('');
+    try {
+      await updateSystemSettings({ afteqadCallPoints: pointsValue }, userData?.id);
+      setAfteqadCallPoints(pointsValue);
+      setCustomAfteqadInput(String(pointsValue));
+      setSettingSavedMsg(`تم حفظ نقاط الافتقاد (${pointsValue} نقطة لكل اتصال) بنجاح ✨`);
+      setTimeout(() => setSettingSavedMsg(''), 3000);
+    } catch (err: any) {
+      console.error(err);
+      alert('تعذر حفظ الإعدادات: ' + err.message);
+    } finally {
+      setSavingPointsSetting(false);
+    }
+  };
 
   const fetchInitialData = async () => {
     setLoadingData(true);
@@ -350,12 +387,18 @@ export const ManageAfetqad = () => {
               <Phone className="w-8 h-8 text-orange-200" />
             </div>
             <div>
-              <span className="inline-block px-3 py-0.5 bg-orange-500/30 text-orange-100 text-xs font-bold rounded-full mb-1">
-                نظام الافتقاد الذكي الأسبوعي
-              </span>
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                <span className="inline-block px-3 py-0.5 bg-orange-500/30 text-orange-100 text-xs font-bold rounded-full">
+                  نظام الافتقاد الذكي الأسبوعي
+                </span>
+                <span className="inline-flex items-center gap-1 px-3 py-0.5 bg-yellow-400/20 text-yellow-100 text-xs font-bold rounded-full border border-yellow-300/30">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  مكافأة الاتصال: +{afteqadCallPoints} نقطة / اتصال
+                </span>
+              </div>
               <h2 className="text-xl md:text-2xl font-black">توزيع ومتابعة افتقاد الشمامسة</h2>
               <p className="text-xs text-orange-100/80 mt-0.5">
-                توزيع عادل ودقيق: 3 أسماء لكل شماس • الغائب يحظى بـ 6 متصلين • الحاضر بـ 3 متصلين
+                توزيع عادل ودقيق: 3 أسماء لكل شماس • الغائب يحظى بـ 6 متصلين • الحاضر بـ 3 متصلين • نقاط تشجيعية لكل اتصال ناجح
               </p>
             </div>
           </div>
@@ -384,6 +427,84 @@ export const ManageAfetqad = () => {
           </div>
         </div>
       </div>
+
+      {/* 🎯 Afteqad Points Configuration Card for Admins */}
+      {userData?.role === 'admin' && (
+        <div className="bg-gradient-to-r from-amber-50/95 via-orange-50/80 to-yellow-50/90 border border-amber-200 rounded-3xl p-5 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="p-3 bg-amber-500 text-white rounded-2xl shadow-sm shrink-0">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-extrabold text-slate-800 text-sm">مكافأة نقاط اتصال الافتقاد</h3>
+                  <span className="px-2 py-0.5 bg-orange-100 text-orange-800 text-[11px] font-bold rounded-full">
+                    الحالي: {afteqadCallPoints} نقطة لكل اتصال
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                  تُضاف هذه النقاط تلقائياً لرصيد الشماس عند الضغط على "تم الاتصال والاطمئنان" على أي من الـ 3 شمامسة المسندين له.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
+              <div className="flex items-center gap-1 bg-white p-1 rounded-2xl border border-slate-200 shadow-inner">
+                <input
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="5"
+                  value={customAfteqadInput}
+                  onChange={(e) => setCustomAfteqadInput(e.target.value)}
+                  className="w-20 px-3 py-1.5 text-center font-black text-slate-800 text-sm focus:outline-none"
+                  placeholder="50"
+                />
+                <span className="text-xs font-bold text-slate-500 pl-2">نقطة</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleSaveAfteqadPoints(Number(customAfteqadInput))}
+                disabled={savingPointsSetting}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+              >
+                {savingPointsSetting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                حفظ التعديل
+              </button>
+
+              {/* Quick Presets */}
+              <div className="hidden sm:flex items-center gap-1 mr-1">
+                {[20, 30, 50, 100].map(val => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => {
+                      setCustomAfteqadInput(String(val));
+                      handleSaveAfteqadPoints(val);
+                    }}
+                    className={`px-2.5 py-1.5 text-[11px] font-bold rounded-xl transition-all border ${
+                      afteqadCallPoints === val
+                        ? 'bg-orange-500 text-white border-orange-600 shadow-sm'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {val}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {settingSavedMsg && (
+            <div className="mt-3 p-2.5 bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-xl animate-in fade-in flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              {settingSavedMsg}
+            </div>
+          )}
+        </div>
+      )}
 
       {activeTab === 'weekly' && (
         <div className="space-y-6">

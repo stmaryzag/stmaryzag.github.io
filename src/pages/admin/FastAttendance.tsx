@@ -12,7 +12,7 @@ export const FastAttendance = () => {
   const [activities, setActivities] = useState<ActivityType[]>([]);
   const [selectedActivityId, setSelectedActivityId] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [filterAssistant, setFilterAssistant] = useState(userData?.role === 'assistant' ? userData.id : 'all');
+  const [filterAssistant, setFilterAssistant] = useState('all');
   const [assistants, setAssistants] = useState<UserData[]>([]);
   
   const [searchTerm, setSearchTerm] = useState('');

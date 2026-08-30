@@ -10,6 +10,7 @@ import {
 import clsx from 'clsx';
 import { SubscriptionRecord, UserLevel } from '../../types';
 import { calculateDeaconLevel, DEFAULT_LEVELS } from '../../utils/levels';
+import { subscribeSystemSettings } from '../../utils/systemSettings';
 
 const MONTH_NAMES_AR = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -22,6 +23,7 @@ export const DeaconDashboard = () => {
   const [team, setTeam] = useState<any>(null);
   const [activities, setActivities] = useState<any[]>([]);
   const [afetqadTasks, setAfetqadTasks] = useState<any[]>([]);
+  const [afteqadCallPoints, setAfteqadCallPoints] = useState<number>(50);
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
   const [levelsList, setLevelsList] = useState<UserLevel[]>(DEFAULT_LEVELS);
   const [allDeaconMonthScores, setAllDeaconMonthScores] = useState<{ id: string; points: number }[]>([]);
@@ -154,6 +156,10 @@ export const DeaconDashboard = () => {
       setAllDeaconMonthScores(list);
     });
 
+    const unsubSettings = subscribeSystemSettings((cfg) => {
+      setAfteqadCallPoints(cfg.afteqadCallPoints ?? 50);
+    });
+
     return () => {
       unsubPoints();
       unsubSub();
@@ -161,6 +167,7 @@ export const DeaconDashboard = () => {
       unsubAfetqad();
       unsubLevels();
       unsubAllPoints();
+      unsubSettings();
     };
   }, [userData, currentMonthKey]);
 
@@ -218,14 +225,14 @@ export const DeaconDashboard = () => {
       
       await addDoc(collection(db, 'points_log'), {
         deaconId: userData?.id,
-        reason: 'إتمام اتصال افتقاد واطمئنان',
-        points: 5,
+        reason: 'إتمام اتصال افتقاد واطمئنان أسبوعي',
+        points: afteqadCallPoints,
         date: new Date().toISOString(),
         addedBy: 'system',
         monthKey: currentMonthKey
       });
       
-      setSuccessMsg('بارك الله فيك! تم تسجيل الافتقاد وإضافة 5 نقاط لمجموعك ✨');
+      setSuccessMsg(`بارك الله فيك! تم تسجيل الافتقاد وإضافة ${afteqadCallPoints} نقطة لمجموعك ✨`);
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (error) {
       console.error(error);
@@ -470,7 +477,7 @@ export const DeaconDashboard = () => {
               <h3 className="font-extrabold text-slate-800 text-sm">افتقاد واطمئنان أسبوعي</h3>
             </div>
             <span className="text-[10px] font-bold px-2 py-0.5 bg-orange-50 text-orange-700 rounded-md border border-orange-200">
-              +5 نقاط لكل اتصال
+              +{afteqadCallPoints} نقطة لكل اتصال
             </span>
           </div>
 

@@ -84,15 +84,17 @@ export async function sendPointsNotification(
 export async function sendSubscriptionNotification(
   deaconId: string,
   monthName: string,
-  recordedByName?: string
+  recordedByName?: string,
+  pointsAwarded: number = 300,
+  amount: number = 30
 ) {
   try {
     const deaconSnap = await getDoc(doc(db, 'users', deaconId));
     if (!deaconSnap.exists()) return;
     const deacon = deaconSnap.data() as UserData;
 
-    const title = `💳 تم سداد اشتراك شهر ${monthName} (30 ج)`;
-    const body = `تم تسجيل سداد اشتراك الخورس الشهري بنجاح${recordedByName ? ` بواسطة الخادم: ${recordedByName}` : ''}. شكراً لالتزامكم!`;
+    const title = `💳 تم سداد اشتراك شهر ${monthName} (${amount} ج) +${pointsAwarded} نقطة ✨`;
+    const body = `تم تسجيل سداد اشتراك الخورس الشهري بنجاح${recordedByName ? ` بواسطة الخادم: ${recordedByName}` : ''} وإضافة ${pointsAwarded} نقطة لرصيدك. شكراً لالتزامكم!`;
 
     // To deacon
     await sendDirectNotification(deaconId, title, body, 'green');
@@ -112,8 +114,8 @@ export async function sendSubscriptionNotification(
     }
 
     if (parentId) {
-      const pTitle = `💳 تم استلام اشتراك شهر ${monthName} لابنك (${deacon.fullName})`;
-      const pBody = `تم تسجيل سداد اشتراك الخورس الشهري (30 جنيه) بنجاح${recordedByName ? ` بواسطة الخادم: ${recordedByName}` : ''}.`;
+      const pTitle = `💳 تم استلام اشتراك شهر ${monthName} لابنك (${deacon.fullName}) +${pointsAwarded} نقطة`;
+      const pBody = `تم تسجيل سداد اشتراك الخورس الشهري (${amount} جنيه) بنجاح وإضافة ${pointsAwarded} نقطة مكافأة لرصيد ابنك${recordedByName ? ` بواسطة الخادم: ${recordedByName}` : ''}.`;
       await sendDirectNotification(parentId, pTitle, pBody, 'green');
     }
   } catch (err) {

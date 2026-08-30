@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, addDoc, onSnapshot, setDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, CheckCircle, Clock, Loader2, CreditCard, CheckCircle2, XCircle, UserCheck, Trash2 } from 'lucide-react';
+import { Users, CheckCircle, Clock, Loader2, CreditCard, CheckCircle2, XCircle, UserCheck, Trash2, Search, Filter, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SubscriptionRecord } from '../../types';
+import { subscribeSystemSettings } from '../../utils/systemSettings';
+import { sendSubscriptionNotification } from '../../utils/notificationHelper';
 
 export const AssistantDashboard = () => {
   const { userData } = useAuth();
@@ -14,8 +16,11 @@ export const AssistantDashboard = () => {
   const [activities, setActivities] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<Record<string, SubscriptionRecord>>({});
   const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({});
+  const [subscriptionPoints, setSubscriptionPoints] = useState<number>(300);
   
   const [selectedActivity, setSelectedActivity] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterScope, setFilterScope] = useState<'all' | 'my'>('all');
   const [attendanceLoadingId, setAttendanceLoadingId] = useState<string | null>(null);
   const [subLoading, setSubLoading] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
@@ -24,16 +29,20 @@ export const AssistantDashboard = () => {
   const todayDateStr = now.toISOString().slice(0, 10);
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-  // Fetch Deacons & Activities
+  // Subscribe to system settings
+  useEffect(() => {
+    const unsub = subscribeSystemSettings((cfg) => {
+      setSubscriptionPoints(cfg.subscriptionPoints ?? 300);
+    });
+    return () => unsub();
+  }, []);
+
+  // Fetch Deacons & Activities & Subscriptions
   useEffect(() => {
     if (!userData?.id) return;
     
-    // Fetch only assigned deacons (or all if admin)
-    let qDeacons = query(collection(db, 'users'), where('role', '==', 'deacon'));
-    if (userData.role === 'assistant') {
-      qDeacons = query(collection(db, 'users'), where('role', '==', 'deacon'), where('assignedAssistantId', '==', userData.id));
-    }
-    
+    // Fetch ALL active deacons so the assistant can record attendance for any deacon
+    const qDeacons = query(collection(db, 'users'), where('role', '==', 'deacon'));
     const unsubDeacons = onSnapshot(qDeacons, (snap) => {
       setDeacons(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
@@ -196,6 +205,7 @@ export const AssistantDashboard = () => {
     const isPaid = !!subscriptions[deacon.id]?.paid;
 
     try {
+      const nowIso = new Date().toISOString();
       await setDoc(doc(db, 'subscriptions', subDocId), {
         deaconId: deacon.id,
         deaconName: deacon.fullName,
@@ -204,13 +214,53 @@ export const AssistantDashboard = () => {
         month: now.getMonth() + 1,
         amount: 30,
         paid: !isPaid,
-        paidAt: !isPaid ? new Date().toISOString() : null,
+        paidAt: !isPaid ? nowIso : null,
         recordedBy: userData?.id,
         recordedByName: userData?.fullName || 'الخادم'
       }, { merge: true });
 
-      setSuccessMsg(isPaid ? `تم إلغاء سداد اشتراك ${deacon.fullName}` : `تم تسجيل دفع اشتراك 30 ج لـ ${deacon.fullName}`);
-      setTimeout(() => setSuccessMsg(''), 2500);
+      if (!isPaid) {
+        // Add Subscription Points
+        if (subscriptionPoints > 0) {
+          await addDoc(collection(db, 'points_log'), {
+            deaconId: deacon.id,
+            reason: `سداد الاشتراك الشهري (${currentMonthKey})`,
+            points: subscriptionPoints,
+            date: nowIso,
+            addedBy: userData?.id,
+            monthKey: currentMonthKey,
+            type: 'subscription_reward'
+          });
+        }
+
+        // Send notifications to deacon & parent
+        await sendSubscriptionNotification(
+          deacon.id,
+          currentMonthKey,
+          userData?.fullName || 'الخادم',
+          subscriptionPoints,
+          30
+        );
+
+        setSuccessMsg(`تم تسجيل دفع اشتراك 30 ج لـ ${deacon.fullName} وإضافة +${subscriptionPoints} نقطة تشجيعية بنجاح ✨`);
+      } else {
+        // Revert Subscription Points
+        const qPts = query(
+          collection(db, 'points_log'),
+          where('deaconId', '==', deacon.id),
+          where('monthKey', '==', currentMonthKey)
+        );
+        const ptsSnap = await getDocs(qPts);
+        for (const docItem of ptsSnap.docs) {
+          const data = docItem.data();
+          if (data.type === 'subscription_reward' || (data.reason && data.reason.includes('سداد الاشتراك'))) {
+            await deleteDoc(doc(db, 'points_log', docItem.id));
+          }
+        }
+        setSuccessMsg(`تم إلغاء سداد اشتراك ${deacon.fullName} وخصم نقاط المكافأة`);
+      }
+
+      setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err: any) {
       console.error(err);
       alert('حدث خطأ: ' + err.message);
@@ -219,11 +269,46 @@ export const AssistantDashboard = () => {
     }
   };
 
+  // Filtered deacons
+  const myAssignedDeacons = deacons.filter(d => d.assignedAssistantId === userData?.id);
+  const filteredDeacons = deacons.filter(d => {
+    if (filterScope === 'my' && d.assignedAssistantId !== userData?.id) {
+      return false;
+    }
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      const matchName = d.fullName?.toLowerCase().includes(term);
+      const matchUser = d.username?.toLowerCase().includes(term);
+      const matchPhone = d.ownPhone?.includes(term) || d.parentPhone?.includes(term);
+      return matchName || matchUser || matchPhone;
+    }
+    return true;
+  });
+
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white p-6 rounded-3xl shadow-sm">
-        <h2 className="text-xl font-bold mb-1">لوحة تحكم الخادم</h2>
-        <p className="text-blue-100 text-xs">تسجيل الحضور السريع، متابعة اشتراك الـ 30ج، وطلبات الأنشطة للشمامسة المخصصين لك.</p>
+      <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-900 text-white p-6 rounded-3xl shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="px-3 py-0.5 bg-blue-500/30 text-blue-200 text-xs font-bold rounded-full">
+                بوابة الخادم
+              </span>
+              <span className="px-3 py-0.5 bg-amber-400/20 text-amber-200 text-xs font-bold rounded-full border border-amber-300/30">
+                +{subscriptionPoints} نقطة عند دفع الاشتراك
+              </span>
+            </div>
+            <h2 className="text-xl md:text-2xl font-black">لوحة تحكم الخادم</h2>
+            <p className="text-blue-100/80 text-xs mt-0.5">
+              تسجيل الحضور السريع، تحصيل اشتراك الـ 30ج، ومراجعة طلبات الأنشطة والاعترافات.
+            </p>
+          </div>
+
+          <div className="bg-white/10 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/15 text-center shrink-0">
+            <span className="text-[11px] text-blue-200 block font-bold">إجمالي الشمامسة</span>
+            <span className="text-xl font-black text-white">{deacons.length} شماس</span>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -236,7 +321,7 @@ export const AssistantDashboard = () => {
           </div>
           <div>
             <h3 className="font-bold text-slate-800 text-sm">تسجيل الحضور الفوري</h3>
-            <p className="text-xs text-slate-500 mt-0.5">تحضير فردي وسريع بضغطة واحدة</p>
+            <p className="text-xs text-slate-500 mt-0.5">تحضير جماعي وسريع لجميع الشمامسة</p>
           </div>
         </button>
 
@@ -267,32 +352,77 @@ export const AssistantDashboard = () => {
         </button>
       </div>
 
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
+        {/* Activity selector and Search Header */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-4">
           <div className="flex items-center gap-2">
             <Users className="w-5 h-5 text-blue-600" />
-            <h3 className="font-bold text-slate-800 text-base">تسجيل الحضور واشتراك الشمامسة</h3>
+            <h3 className="font-bold text-slate-800 text-base">تسجيل الحضور والاشتراكات</h3>
           </div>
-          <select 
-            value={selectedActivity}
-            onChange={(e) => setSelectedActivity(e.target.value)}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 text-xs font-bold text-slate-700"
-          >
-            <option value="">-- اختر نشاط اليوم لتسجيل الحضور --</option>
-            {activities.map(a => (
-              <option key={a.id} value={a.id}>{a.name} (+{a.defaultPoints} نقطة)</option>
-            ))}
-          </select>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <select 
+              value={selectedActivity}
+              onChange={(e) => setSelectedActivity(e.target.value)}
+              className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 text-xs font-bold text-slate-700"
+            >
+              <option value="">-- اختر نشاط اليوم لتسجيل الحضور --</option>
+              {activities.map(a => (
+                <option key={a.id} value={a.id}>{a.name} (+{a.defaultPoints} نقطة)</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Filters and search */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Filter Scope Tabs */}
+          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-2xl">
+            <button
+              type="button"
+              onClick={() => setFilterScope('all')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                filterScope === 'all'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              جميع الشمامسة ({deacons.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterScope('my')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                filterScope === 'my'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              مجموعتي المسندة ({myAssignedDeacons.length})
+            </button>
+          </div>
+
+          {/* Search box */}
+          <div className="relative flex-1 sm:max-w-xs">
+            <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+            <input
+              type="text"
+              placeholder="بحث بالاسم أو الهاتف..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-3 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+            />
+          </div>
         </div>
 
         {successMsg && (
-          <div className="mb-4 p-3 bg-emerald-50 text-emerald-800 rounded-2xl border border-emerald-200 text-xs font-bold text-center">
+          <div className="p-3 bg-emerald-50 text-emerald-800 rounded-2xl border border-emerald-200 text-xs font-bold text-center animate-in fade-in">
             {successMsg}
           </div>
         )}
 
-        <div className="space-y-3">
-          {deacons.map(deacon => {
+        <div className="space-y-3 pt-2">
+          {filteredDeacons.map(deacon => {
             const isSubPaid = !!subscriptions[deacon.id]?.paid;
             const isSubBusy = subLoading === deacon.id;
             const isAttended = !!attendanceMap[deacon.id];
@@ -335,12 +465,12 @@ export const AssistantDashboard = () => {
                     ) : isSubPaid ? (
                       <>
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        اشتراك الشهر (30ج): مدفوع
+                        اشتراك الشهر: مدفوع (+{subscriptionPoints} pt)
                       </>
                     ) : (
                       <>
                         <XCircle className="w-3.5 h-3.5 text-rose-500" />
-                        دفع اشتراك 30 ج
+                        دفع اشتراك 30 ج (+{subscriptionPoints} pt)
                       </>
                     )}
                   </button>
@@ -375,8 +505,10 @@ export const AssistantDashboard = () => {
             );
           })}
 
-          {deacons.length === 0 && (
-            <p className="text-center text-slate-400 py-6 text-sm">لا يوجد شمامسة مخصصين لك حالياً.</p>
+          {filteredDeacons.length === 0 && (
+            <div className="text-center text-slate-400 py-8 text-sm">
+              لا يوجد شمامسة مطابقين لخيارات البحث.
+            </div>
           )}
         </div>
       </div>
