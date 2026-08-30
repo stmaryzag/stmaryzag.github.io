@@ -122,19 +122,29 @@ export const sendOneSignalPush = async (params: {
     console.log('🚀 Dispatching OneSignal Push request via backend proxy...');
     
     // Call server endpoint (avoids CORS and protects API keys)
-    const res = await fetch('/api/onesignal/push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params)
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      console.log('✅ Server Push Response:', data);
-      return data.result || data;
+    let res: Response | null = null;
+    try {
+      res = await fetch('/api/onesignal/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      });
+    } catch (e) {
+      console.warn('Failed to reach backend proxy:', e);
     }
 
-    console.warn('Backend proxy returned status:', res.status);
+    if (res && res.ok) {
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await res.json();
+        console.log('✅ Server Push Response:', data);
+        return data.result || data;
+      } else {
+        console.warn('Backend proxy returned non-JSON (likely SPA fallback). Proceeding to direct request.');
+      }
+    } else if (res) {
+      console.warn('Backend proxy returned status:', res.status);
+    }
     
     // Fallback direct request if proxy route is unavailable (e.g. GitHub Pages static hosting)
     const payload: Record<string, any> = {
@@ -158,12 +168,10 @@ export const sendOneSignalPush = async (params: {
     }
 
     const targetUrl = 'https://onesignal.com/api/v1/notifications';
-    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 
-    // Try sending directly first, if CORS error occurs try CORS proxy
-    let apiRes: Response;
     try {
-      apiRes = await fetch(targetUrl, {
+      console.warn('Attempting direct fetch to OneSignal... (This will likely fail on static hosts due to CORS)');
+      const apiRes = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
@@ -171,23 +179,18 @@ export const sendOneSignalPush = async (params: {
         },
         body: JSON.stringify(payload)
       });
+      const result = await apiRes.json();
+      console.log('✅ OneSignal Push Fallback Result:', result);
+      return result;
     } catch (corsErr) {
-      console.warn('Direct fetch failed (CORS on static host), using CORS proxy fallback...', corsErr);
-      apiRes = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`
-        },
-        body: JSON.stringify(payload)
-      });
+      console.error('Direct fetch failed (CORS on static host). GitHub Pages cannot send push notifications because it lacks a backend.', corsErr);
+      throw new Error('CORS_ERROR_STATIC_HOST');
     }
-
-    const result = await apiRes.json();
-    console.log('✅ OneSignal Push Fallback Result:', result);
-    return result;
-  } catch (err) {
+  } catch (err: any) {
     console.error('❌ Error in sendOneSignalPush:', err);
+    if (err.message === 'CORS_ERROR_STATIC_HOST') {
+       throw err; // bubble up to UI
+    }
     return null;
   }
 };

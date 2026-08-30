@@ -403,15 +403,23 @@ export const ManageNotifications = () => {
       setBody('');
       setSpecificUserId('');
 
+      const hasErrors = pushRes?.errors || pushRes?.result?.errors;
       const recipients = pushRes?.result?.recipients ?? pushRes?.recipients;
-      if (recipients === 0) {
+      
+      if (hasErrors && (!recipients || recipients === 0)) {
+         setSuccessMsg(`تم حفظ الإشعار بالصندوق، ولكن لم يوجد أجهزة مشتركة حالياً في OneSignal بانتظار الإشعار. يرجى الضغط على "تفعيل الإشعارات" في الموبايل أولاً.`);
+      } else if (recipients === 0) {
         setSuccessMsg(`تم حفظ الإشعار بالصندوق، ولكن لم يوجد أجهزة مشتركة حالياً في OneSignal بانتظار الإشعار. يرجى الضغط على "تفعيل الإشعارات" في الموبايل أولاً.`);
       } else {
         setSuccessMsg(`تم إرسال الإشعار بنجاح لـ ${recipients ? recipients + ' جهاز' : targets.length + ' مستخدم'}! 🚀`);
       }
     } catch (err: any) {
       console.error(err);
-      setErrorMsg('حدث خطأ أثناء الإرسال: ' + err.message);
+      if (err.message === 'CORS_ERROR_STATIC_HOST') {
+        setErrorMsg('نعتذر، لا يمكن إرسال الإشعارات مباشرة من استضافة GitHub Pages الساكنة (بسبب قيود CORS). يُرجى استخدام رابط تطبيق AI Studio أو نشر التطبيق على استضافة تدعم Node.js مثل Render أو Vercel لإرسال الإشعارات.');
+      } else {
+        setErrorMsg('حدث خطأ أثناء الإرسال: ' + err.message);
+      }
     } finally {
       setSendingInstant(false);
     }
