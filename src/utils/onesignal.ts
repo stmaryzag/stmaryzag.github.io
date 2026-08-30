@@ -107,7 +107,7 @@ export const isPushPermissionGranted = (): boolean => {
 };
 
 /**
- * Send push notification via OneSignal REST API directly to devices or users!
+ * Send push notification via server API proxy directly to devices or users!
  */
 export const sendOneSignalPush = async (params: {
   externalUserIds?: string[];
@@ -119,45 +119,56 @@ export const sendOneSignalPush = async (params: {
   data?: Record<string, any>;
 }) => {
   try {
+    console.log('🚀 Dispatching OneSignal Push request via backend proxy...');
+    
+    // Call server endpoint (avoids CORS and protects API keys)
+    const res = await fetch('/api/onesignal/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      console.log('✅ Server Push Response:', data);
+      return data.result || data;
+    }
+
+    console.warn('Backend proxy returned status:', res.status);
+    
+    // Fallback direct request if proxy route is unavailable
     const payload: Record<string, any> = {
       app_id: ONESIGNAL_APP_ID,
       headings: { ar: params.title, en: params.title },
       contents: { ar: params.body, en: params.body },
     };
 
-    if (params.url) {
-      payload.url = params.url;
-    }
-
-    if (params.data) {
-      payload.data = params.data;
-    }
+    if (params.url) payload.url = params.url;
+    if (params.data) payload.data = params.data;
 
     if (params.filters && params.filters.length > 0) {
       payload.filters = params.filters;
     } else if (params.externalUserIds && params.externalUserIds.length > 0) {
-      // Target specific external user IDs
       payload.include_external_user_ids = params.externalUserIds;
+      payload.include_aliases = { external_id: params.externalUserIds };
       payload.channel_for_external_user_ids = 'push';
     } else if (params.includedSegments && params.includedSegments.length > 0) {
       payload.included_segments = params.includedSegments;
     } else {
-      payload.included_segments = ['Subscribers'];
+      payload.included_segments = ['Subscribers', 'Total Subscriptions', 'All'];
     }
-
-    console.log('🚀 Sending OneSignal Push:', payload);
 
     const response = await fetch('https://onesignal.com/api/v1/notifications', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': `Basic ${ONESIGNAL_REST_API_KEY}`
+        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`
       },
       body: JSON.stringify(payload)
     });
 
     const result = await response.json();
-    console.log('✅ OneSignal Push Send Result:', result);
+    console.log('✅ Direct OneSignal Push Result:', result);
     return result;
   } catch (err) {
     console.error('❌ Error in sendOneSignalPush:', err);
