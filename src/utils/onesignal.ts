@@ -136,7 +136,7 @@ export const sendOneSignalPush = async (params: {
 
     console.warn('Backend proxy returned status:', res.status);
     
-    // Fallback direct request if proxy route is unavailable
+    // Fallback direct request if proxy route is unavailable (e.g. GitHub Pages static hosting)
     const payload: Record<string, any> = {
       app_id: ONESIGNAL_APP_ID,
       headings: { ar: params.title, en: params.title },
@@ -157,17 +157,34 @@ export const sendOneSignalPush = async (params: {
       payload.included_segments = ['Subscribers'];
     }
 
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`
-      },
-      body: JSON.stringify(payload)
-    });
+    const targetUrl = 'https://onesignal.com/api/v1/notifications';
+    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
 
-    const result = await response.json();
-    console.log('✅ Direct OneSignal Push Result:', result);
+    // Try sending directly first, if CORS error occurs try CORS proxy
+    let apiRes: Response;
+    try {
+      apiRes = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`
+        },
+        body: JSON.stringify(payload)
+      });
+    } catch (corsErr) {
+      console.warn('Direct fetch failed (CORS on static host), using CORS proxy fallback...', corsErr);
+      apiRes = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`
+        },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    const result = await apiRes.json();
+    console.log('✅ OneSignal Push Fallback Result:', result);
     return result;
   } catch (err) {
     console.error('❌ Error in sendOneSignalPush:', err);
