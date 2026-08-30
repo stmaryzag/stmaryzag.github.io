@@ -79,28 +79,6 @@ export const Profile = () => {
     }
   };
 
-  const promoteToAdmin = async () => {
-    if (!currentUser?.uid) return;
-    setLoading(true);
-    try {
-      await setDoc(doc(db, 'users', currentUser.uid), {
-        role: 'admin'
-      }, { merge: true });
-      if (userData?.id && userData.id !== currentUser.uid) {
-        await setDoc(doc(db, 'users', userData.id), {
-          role: 'admin'
-        }, { merge: true });
-      }
-      await reloadUserData();
-      setMsg({ type: 'success', text: 'تم ترقية الحساب إلى مسؤول (Admin) بنجاح!' });
-    } catch (err: any) {
-      console.error(err);
-      setMsg({ type: 'error', text: 'تعذر الترقية: ' + err.message });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const getRoleName = (r?: string) => {
     switch (r) {
       case 'admin': return 'أدمن (مدير النظام)';
@@ -161,28 +139,6 @@ export const Profile = () => {
         <div className={`p-4 rounded-2xl text-sm flex items-center gap-2 ${msg.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
           {msg.type === 'success' ? <CheckCircle className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 shrink-0" />}
           <span>{msg.text}</span>
-        </div>
-      )}
-
-      {/* Role Upgrade Card if not admin */}
-      {userData?.role !== 'admin' && (
-        <div className="bg-amber-50 border border-amber-200 p-5 rounded-3xl flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl">
-              <Shield className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="font-bold text-amber-900 text-sm">هل أنت مدير الخدمة؟</h4>
-              <p className="text-xs text-amber-700">يمكنك ترقية هذا الحساب إلى مسؤول (Admin)</p>
-            </div>
-          </div>
-          <button
-            onClick={promoteToAdmin}
-            disabled={loading}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shrink-0 shadow-sm"
-          >
-            تفعيل كـ Admin
-          </button>
         </div>
       )}
 

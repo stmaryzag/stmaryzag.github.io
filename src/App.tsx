@@ -18,6 +18,7 @@ import { ManageAfetqad } from './pages/admin/ManageAfetqad';
 import { ManageNotifications } from './pages/admin/ManageNotifications';
 import { ManageSubscriptions } from './pages/admin/ManageSubscriptions';
 import { ManageLevels } from './pages/admin/ManageLevels';
+import { FastAttendance } from './pages/admin/FastAttendance';
 import { Profile } from './pages/Profile';
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin/attendance" element={<FastAttendance />} />
               <Route path="/admin/areas" element={<ManageAreas />} />
               <Route path="/admin/teams" element={<ManageTeams />} />
               <Route path="/admin/activities" element={<ManageActivities />} />

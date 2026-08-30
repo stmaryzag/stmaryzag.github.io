@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Home, User, Bell, LogOut, Shield } from 'lucide-react';
+import { Home, User, Bell, LogOut, Shield, UserCheck, Trophy } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import clsx from 'clsx';
 import { useState, useEffect } from 'react';
@@ -28,40 +28,86 @@ export const AppLayout = () => {
 
   const navItems = [
     { label: 'الرئيسية', icon: Home, path: '/' },
+    ...(userData?.role === 'admin' || userData?.role === 'assistant' 
+      ? [{ label: 'الحضور السريع', icon: UserCheck, path: '/admin/attendance' }] 
+      : []),
     { label: 'الإشعارات', icon: Bell, path: '/notifications', badge: unreadCount },
-    ...(userData?.role === 'admin' ? [{ label: 'الإدارة', icon: Shield, path: '/admin' }] : []),
+    ...(userData?.role === 'admin' ? [{ label: 'لوحة الإدارة', icon: Shield, path: '/admin' }] : []),
     { label: 'حسابي', icon: User, path: '/profile' },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Top Header */}
-      <header className="bg-white shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+      <header className="bg-white/95 backdrop-blur-md shadow-xs border-b border-slate-100 px-4 sm:px-6 py-3 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center gap-3">
-          {userData?.photoUrl ? (
-            <img src={userData.photoUrl} alt={userData.fullName} className="w-10 h-10 rounded-full object-cover border border-slate-200" />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 font-bold">
-              {userData?.fullName?.charAt(0) || 'ش'}
+          <div className="relative">
+            {userData?.photoUrl ? (
+              <img src={userData.photoUrl} alt={userData.fullName} className="w-10 h-10 rounded-full object-cover border-2 border-indigo-100 shadow-xs" />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600 to-blue-500 text-white flex items-center justify-center font-bold text-sm shadow-xs">
+                {userData?.fullName?.charAt(0) || 'ش'}
+              </div>
+            )}
+            <span className="absolute bottom-0 left-0 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-white"></span>
+          </div>
+
+          <div className="min-w-0">
+            <h1 className="font-extrabold text-slate-800 text-sm truncate">{userData?.fullName}</h1>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[11px] font-bold px-2 py-0.2 rounded-full bg-indigo-50 text-indigo-700">
+                {userData?.role === 'deacon' ? 'شماس' : userData?.role === 'admin' ? 'أدمن النظام' : userData?.role === 'assistant' ? 'خادم مساعد' : 'ولي أمر'}
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono hidden sm:inline" dir="ltr">@{userData?.username}</span>
             </div>
-          )}
-          <div>
-            <h1 className="font-bold text-slate-800 text-sm">{userData?.fullName}</h1>
-            <p className="text-xs text-slate-500 capitalize">{userData?.role === 'deacon' ? 'شماس' : userData?.role === 'admin' ? 'أدمن' : userData?.role === 'assistant' ? 'مساعد' : 'ولي أمر'}</p>
           </div>
         </div>
-        <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 transition-colors">
+
+        {/* Desktop Nav Items */}
+        <div className="hidden md:flex items-center gap-1.5 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/60">
+          {navItems.map((item) => {
+            const isActive = location.pathname === item.path;
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.path}
+                onClick={() => navigate(item.path)}
+                className={clsx(
+                  "relative flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all select-none",
+                  isActive 
+                    ? "bg-white text-indigo-600 shadow-xs" 
+                    : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                )}
+              >
+                <Icon className="w-4 h-4" />
+                <span>{item.label}</span>
+                {item.badge && item.badge > 0 ? (
+                  <span className="bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full">
+                    {item.badge > 9 ? '9+' : item.badge}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Logout Button */}
+        <button 
+          onClick={handleLogout} 
+          title="تسجيل الخروج"
+          className="p-2.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-2xl transition-all"
+        >
           <LogOut className="w-5 h-5" />
         </button>
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto pb-20 p-4">
+      <main className="flex-1 overflow-y-auto pb-24 md:pb-8 p-4 sm:p-6 max-w-7xl w-full mx-auto">
         <Outlet />
       </main>
 
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 w-full bg-white border-t border-slate-200 pb-safe">
+      {/* Bottom Navigation (Mobile Only) */}
+      <nav className="md:hidden fixed bottom-0 w-full bg-white/95 backdrop-blur-md border-t border-slate-200/80 z-30 pb-safe shadow-lg">
         <div className="flex items-center justify-around p-2">
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
@@ -71,19 +117,19 @@ export const AppLayout = () => {
                 key={item.path}
                 onClick={() => navigate(item.path)}
                 className={clsx(
-                  "relative flex flex-col items-center justify-center p-2 w-16 gap-1 rounded-xl transition-colors",
-                  isActive ? "text-blue-600" : "text-slate-400 hover:text-slate-600"
+                  "relative flex flex-col items-center justify-center p-2 min-w-[56px] gap-1 rounded-2xl transition-all",
+                  isActive ? "text-indigo-600 font-black" : "text-slate-400 hover:text-slate-600 font-bold"
                 )}
               >
                 <div className="relative">
-                  <Icon className={clsx("w-6 h-6", isActive && "fill-blue-50")} />
-                  {item.badge && item.badge > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[16px] text-center">
+                  <Icon className={clsx("w-5 h-5 transition-transform", isActive && "scale-110")} />
+                  {item.badge && item.badge > 0 ? (
+                    <span className="absolute -top-1.5 -right-2 bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full min-w-[16px] text-center shadow-xs">
                       {item.badge > 9 ? '9+' : item.badge}
                     </span>
-                  )}
+                  ) : null}
                 </div>
-                <span className="text-[10px] font-medium">{item.label}</span>
+                <span className="text-[10px] leading-none">{item.label}</span>
               </button>
             );
           })}

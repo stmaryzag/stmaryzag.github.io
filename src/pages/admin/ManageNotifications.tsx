@@ -57,10 +57,13 @@ export const ManageNotifications = () => {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [colorTag, setColorTag] = useState<'blue' | 'green' | 'red' | 'yellow'>('blue');
-  const [audience, setAudience] = useState<'all' | 'deacons' | 'parents'>('all');
+  const [audience, setAudience] = useState<'all' | 'deacons' | 'parents' | 'specific_user'>('all');
+  const [specificUserId, setSpecificUserId] = useState('');
+  const [allUsersList, setAllUsersList] = useState<any[]>([]);
   const [sendDate, setSendDate] = useState('');
   const [sendTime, setSendTime] = useState('');
   const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [sendingInstant, setSendingInstant] = useState(false);
 
   // Recurring Notifications State
   const [recurringList, setRecurringList] = useState<RecurringNotification[]>([]);
@@ -82,9 +85,21 @@ export const ManageNotifications = () => {
   useEffect(() => {
     fetchScheduled();
     fetchRecurring();
+    fetchUsers();
     // Auto-check due notifications silently on page load
     runSilentAutoDispatch();
   }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'users'));
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a: any, b: any) => (a.fullName || '').localeCompare(b.fullName || '', 'ar'));
+      setAllUsersList(list);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const fetchScheduled = async () => {
     try {
@@ -151,6 +166,8 @@ export const ManageNotifications = () => {
           targets = allUsers.filter((u: any) => u.role === 'deacon');
         } else if (notif.audience === 'parents') {
           targets = allUsers.filter((u: any) => u.role === 'parent');
+        } else if (notif.audience === 'specific_user' && notif.specificUserId) {
+          targets = allUsers.filter((u: any) => u.id === notif.specificUserId);
         }
 
         for (const targetUser of targets) {
@@ -249,6 +266,10 @@ export const ManageNotifications = () => {
       setErrorMsg('يرجى إكمال جميع الحقول');
       return;
     }
+    if (audience === 'specific_user' && !specificUserId) {
+      setErrorMsg('يرجى اختيار المستخدم المستهدف');
+      return;
+    }
 
     setLoadingSchedule(true);
     setErrorMsg('');
@@ -261,6 +282,7 @@ export const ManageNotifications = () => {
         body: body.trim(),
         colorTag,
         audience,
+        specificUserId: audience === 'specific_user' ? specificUserId : null,
         sendAt: sendAtIso,
         createdBy: userData?.id || 'admin',
         createdAt: new Date().toISOString(),
@@ -271,6 +293,7 @@ export const ManageNotifications = () => {
       setBody('');
       setSendDate('');
       setSendTime('');
+      setSpecificUserId('');
       setSuccessMsg('تمت جدولة الإشعار بنجاح ✅');
       await fetchScheduled();
     } catch (err: any) {
@@ -278,6 +301,55 @@ export const ManageNotifications = () => {
       setErrorMsg('حدث خطأ أثناء الجدولة: ' + err.message);
     } finally {
       setLoadingSchedule(false);
+    }
+  };
+
+  // Instant Send Notification directly to inbox
+  const handleSendInstant = async () => {
+    if (!title.trim() || !body.trim()) {
+      setErrorMsg('يرجى كتابة عنوان ونص الإشعار أولاً');
+      return;
+    }
+    if (audience === 'specific_user' && !specificUserId) {
+      setErrorMsg('يرجى اختيار المستخدم المستهدف');
+      return;
+    }
+
+    setSendingInstant(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const nowIso = new Date().toISOString();
+      let targets = allUsersList;
+      if (audience === 'deacons') {
+        targets = allUsersList.filter(u => u.role === 'deacon');
+      } else if (audience === 'parents') {
+        targets = allUsersList.filter(u => u.role === 'parent');
+      } else if (audience === 'specific_user' && specificUserId) {
+        targets = allUsersList.filter(u => u.id === specificUserId);
+      }
+
+      for (const targetUser of targets) {
+        await addDoc(collection(db, 'notifications_inbox'), {
+          userId: targetUser.id,
+          title: title.trim(),
+          body: body.trim(),
+          colorTag: colorTag || 'blue',
+          createdAt: nowIso,
+          read: false
+        });
+      }
+
+      setTitle('');
+      setBody('');
+      setSpecificUserId('');
+      setSuccessMsg(`تم إرسال الإشعار فوراً إلى ${targets.length} مستخدم بنجاح! 🚀`);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg('حدث خطأ أثناء الإرسال: ' + err.message);
+    } finally {
+      setSendingInstant(false);
     }
   };
 
@@ -757,41 +829,75 @@ export const ManageNotifications = () => {
                     onChange={e => setAudience(e.target.value as any)} 
                     className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:border-purple-500"
                   >
-                    <option value="all">الجميع</option>
+                    <option value="all">الجميع (عام)</option>
                     <option value="deacons">الشمامسة فقط</option>
-                    <option value="parents">أولياء الأمور</option>
+                    <option value="parents">أولياء الأمور فقط</option>
+                    <option value="specific_user">مستخدم معين (شماس / ولي أمر / خادم)</option>
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">التاريخ</label>
-                  <input 
-                    required 
-                    type="date" 
-                    value={sendDate} 
-                    onChange={e => setSendDate(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:border-purple-500" 
-                  />
+
+              {audience === 'specific_user' && (
+                <div className="p-3 bg-purple-50/60 rounded-2xl border border-purple-200 space-y-1.5 animate-in fade-in">
+                  <label className="block text-xs font-bold text-purple-900">اختر الشخص المستهدف للإشعار:</label>
+                  <select
+                    value={specificUserId}
+                    onChange={e => setSpecificUserId(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-purple-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-purple-500"
+                  >
+                    <option value="">-- اختر المستخدم من القائمة --</option>
+                    {allUsersList.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName} (@{u.username}) - {u.role === 'deacon' ? 'شماس' : u.role === 'parent' ? 'ولي أمر' : u.role === 'assistant' ? 'خادم مساعد' : 'أدمن'}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">الوقت</label>
-                  <input 
-                    required 
-                    type="time" 
-                    value={sendTime} 
-                    onChange={e => setSendTime(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:border-purple-500" 
-                  />
+              )}
+
+              <div className="pt-2 border-t border-slate-100 space-y-3">
+                <button 
+                  type="button"
+                  onClick={handleSendInstant}
+                  disabled={sendingInstant || !title.trim() || !body.trim()} 
+                  className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs py-3 rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 transition-all disabled:opacity-50"
+                >
+                  {sendingInstant ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  إرسال فوري الآن للوارد 🚀
+                </button>
+
+                <div className="text-center text-[10px] text-slate-400 font-bold">— أو حدد موعداً للجدولة —</div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">تاريخ الجدولة</label>
+                    <input 
+                      type="date" 
+                      value={sendDate} 
+                      onChange={e => setSendDate(e.target.value)} 
+                      className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:border-purple-500" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">وقت الجدولة</label>
+                    <input 
+                      type="time" 
+                      value={sendTime} 
+                      onChange={e => setSendTime(e.target.value)} 
+                      className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-xs font-bold text-slate-800 focus:outline-none focus:border-purple-500" 
+                    />
+                  </div>
                 </div>
+
+                <button 
+                  type="submit"
+                  disabled={loadingSchedule || !title.trim() || !body.trim() || !sendDate || !sendTime} 
+                  className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-3 rounded-2xl flex items-center justify-center gap-2 shadow-md shadow-purple-600/20 transition-all disabled:opacity-50"
+                >
+                  {loadingSchedule ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+                  حفظ الجدولة الآلية
+                </button>
               </div>
-              <button 
-                disabled={loadingSchedule} 
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-3 rounded-xl flex items-center justify-center gap-2 shadow-md shadow-purple-600/20 transition-all disabled:opacity-50 mt-2"
-              >
-                {loadingSchedule ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
-                حفظ الجدولة
-              </button>
             </form>
           </div>
 

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, addDoc, onSnapshot, setDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, CheckCircle, Clock, Search, Loader2, CreditCard, CheckCircle2, XCircle } from 'lucide-react';
+import { Users, CheckCircle, Clock, Search, Loader2, CreditCard, CheckCircle2, XCircle, UserCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SubscriptionRecord } from '../../types';
 
@@ -137,7 +137,20 @@ export const AssistantDashboard = () => {
         <p className="text-blue-100 text-xs">تسجيل الحضور السريع، متابعة اشتراك الـ 30ج، وطلبات الأنشطة للشمامسة المخصصين لك.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <button 
+          onClick={() => navigate('/admin/attendance')}
+          className="bg-white hover:bg-teal-50/50 p-5 rounded-3xl border border-slate-100 flex items-center gap-4 transition-all shadow-sm text-right group"
+        >
+          <div className="p-3 bg-teal-600 text-white rounded-2xl group-hover:scale-105 transition-transform">
+            <UserCheck className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 text-sm">تسجيل الحضور الفوري</h3>
+            <p className="text-xs text-slate-500 mt-0.5">تحضير فردي وسريع بضغطة واحدة</p>
+          </div>
+        </button>
+
         <button 
           onClick={() => navigate('/admin/requests')}
           className="bg-white hover:bg-blue-50/50 p-5 rounded-3xl border border-slate-100 flex items-center gap-4 transition-all shadow-sm text-right group"
@@ -159,7 +172,7 @@ export const AssistantDashboard = () => {
             <CreditCard className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="font-bold text-slate-800 text-sm">كشف الاشتراكات الشهرية (30 ج)</h3>
+            <h3 className="font-bold text-slate-800 text-sm">كشف الاشتراكات (30 ج)</h3>
             <p className="text-xs text-slate-500 mt-0.5">استعراض سجل تحصيل جميع الشهور</p>
           </div>
         </button>

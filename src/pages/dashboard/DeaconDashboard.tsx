@@ -24,9 +24,11 @@ export const DeaconDashboard = () => {
   const [afetqadTasks, setAfetqadTasks] = useState<any[]>([]);
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
   const [levelsList, setLevelsList] = useState<UserLevel[]>(DEFAULT_LEVELS);
+  const [allDeaconMonthScores, setAllDeaconMonthScores] = useState<{ id: string; points: number }[]>([]);
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState('');
+  const [requestNotes, setRequestNotes] = useState('');
   const [requestLoading, setRequestLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -137,12 +139,28 @@ export const DeaconDashboard = () => {
       setAfetqadTasks(tasks);
     });
 
+    // Fetch Month Points for all deacons to determine Top 3 Standing
+    const qAllPoints = query(collection(db, 'points_log'), where('monthKey', '==', currentMonthKey));
+    const unsubAllPoints = onSnapshot(qAllPoints, (snap) => {
+      const deaconTotals: Record<string, number> = {};
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.deaconId) {
+          deaconTotals[data.deaconId] = (deaconTotals[data.deaconId] || 0) + (data.points || 0);
+        }
+      });
+      const list = Object.entries(deaconTotals).map(([id, points]) => ({ id, points }));
+      list.sort((a, b) => b.points - a.points);
+      setAllDeaconMonthScores(list);
+    });
+
     return () => {
       unsubPoints();
       unsubSub();
       unsubActivities();
       unsubAfetqad();
       unsubLevels();
+      unsubAllPoints();
     };
   }, [userData, currentMonthKey]);
 
@@ -153,6 +171,13 @@ export const DeaconDashboard = () => {
   const totalAllTimePoints = pointsLog
     .reduce((acc, curr) => acc + (curr.points || 0), 0);
 
+  // Compute Rank in Month and Top 3 status
+  const userRankIndex = allDeaconMonthScores.findIndex(s => s.id === userData?.id);
+  const userRankPosition = userRankIndex !== -1 ? userRankIndex + 1 : (allDeaconMonthScores.length + 1);
+  const isTopThree = userRankPosition <= 3;
+  const thirdPlaceScore = allDeaconMonthScores[2]?.points || 0;
+  const pointsToTopThree = Math.max(1, (thirdPlaceScore - currentMonthPoints) + 1);
+
   // Dynamic Level & Rank calculations for Gamification
   const currentRank = calculateDeaconLevel(totalAllTimePoints, levelsList);
   const progressPercent = Math.min(100, Math.round((totalAllTimePoints / currentRank.nextLevelPoints) * 100));
@@ -162,15 +187,19 @@ export const DeaconDashboard = () => {
     if (!selectedActivity || !userData?.id) return;
     setRequestLoading(true);
     try {
+      const act = activities.find(a => a.id === selectedActivity);
       await addDoc(collection(db, 'registration_requests'), {
         deaconId: userData.id,
         activityTypeId: selectedActivity,
+        activityName: act?.name || '',
+        notes: requestNotes.trim(),
         date: new Date().toISOString(),
         status: 'pending'
       });
       setSuccessMsg('تم إرسال طلبك للخادم للموافقة عليه بنجاح ✨');
       setIsModalOpen(false);
       setSelectedActivity('');
+      setRequestNotes('');
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
       console.error(error);
@@ -298,6 +327,48 @@ export const DeaconDashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* 🏆 TOP 3 DISTINCTION STATUS STATEMENT BANNER */}
+      {isTopThree ? (
+        <div className="relative overflow-hidden bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 p-5 rounded-3xl text-slate-950 shadow-lg border-2 border-yellow-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-slate-950/10 backdrop-blur-md flex items-center justify-center shrink-0 border border-slate-950/15">
+              <Trophy className="w-6 h-6 text-slate-950" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="bg-slate-950 text-amber-300 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                  المركز #{userRankPosition} على مستوى الخورس
+                </span>
+                <span className="text-xs font-extrabold text-slate-900">شهر {currentMonthName}</span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black mt-1 text-slate-950 leading-snug">
+                🎉 رائع جداً يا {userData?.fullName}! أنت حالياً من الثلاثة الأوائل في الخورس هذا الشهر! حافظ على تميزك وصدارتك! 🌟
+              </h3>
+            </div>
+          </div>
+          <div className="shrink-0 bg-slate-950 text-amber-400 px-4 py-2 rounded-2xl font-mono font-black text-sm text-center shadow-md">
+            {currentMonthPoints} نقطة
+          </div>
+        </div>
+      ) : (
+        <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-3xl border border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center shrink-0 text-indigo-300">
+              <Flame className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-400">موقعك في لوحة شرف شهر {currentMonthName}:</p>
+              <h4 className="text-sm font-extrabold text-slate-200 mt-0.5">
+                أنت حالياً بالمركز <strong className="text-indigo-400 font-mono">#{userRankPosition}</strong> (لست من الثلاثة الأوائل بعد). باقي لك <strong className="text-amber-400 font-mono">{pointsToTopThree}</strong> نقطة لدخول الثلاثة الأوائل! 💪
+              </h4>
+            </div>
+          </div>
+          <div className="text-left sm:text-right">
+            <span className="text-[11px] text-slate-400">المركز الثالث يمتلك: <strong className="text-amber-400 font-mono">{thirdPlaceScore}</strong> نقطة</span>
+          </div>
+        </div>
+      )}
 
       {/* 💳 MONTHLY SUBSCRIPTION STATUS CARD (Color Coded 30 EGP) */}
       <div className={clsx(
@@ -499,29 +570,34 @@ export const DeaconDashboard = () => {
               </button>
             </div>
 
-            <form onSubmit={handleRequestRegistration} className="p-6 space-y-5">
+            <form onSubmit={handleRequestRegistration} className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-2">اختر نوع النشاط أو القداس:</label>
-                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                   {activities.map(act => (
                     <label 
                       key={act.id} 
                       className={clsx(
-                        "flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all",
+                        "flex items-center justify-between p-3.5 rounded-2xl border-2 cursor-pointer transition-all",
                         selectedActivity === act.id 
                           ? "border-blue-500 bg-blue-50/60 shadow-xs" 
                           : "border-slate-100 hover:border-blue-200 hover:bg-slate-50"
                       )}
                     >
-                      <span className="font-bold text-slate-800 text-sm">{act.name}</span>
-                      <input 
-                        type="radio" 
-                        name="activity" 
-                        value={act.id} 
-                        checked={selectedActivity === act.id} 
-                        onChange={(e) => setSelectedActivity(e.target.value)}
-                        className="w-4 h-4 text-blue-600 accent-blue-600"
-                      />
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="radio" 
+                          name="activity" 
+                          value={act.id} 
+                          checked={selectedActivity === act.id} 
+                          onChange={(e) => setSelectedActivity(e.target.value)}
+                          className="w-4 h-4 text-blue-600 accent-blue-600"
+                        />
+                        <span className="font-bold text-slate-800 text-xs">{act.name}</span>
+                      </div>
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[10px] font-bold rounded-lg">
+                        +{act.defaultPoints} نقطة
+                      </span>
                     </label>
                   ))}
 
@@ -531,10 +607,21 @@ export const DeaconDashboard = () => {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات إضافية (اختياري):</label>
+                <input
+                  type="text"
+                  placeholder="مثال: قداس الأربعاء بكنيسة مارمرقس، اسم أب الاعتراف..."
+                  value={requestNotes}
+                  onChange={(e) => setRequestNotes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
               <button 
                 type="submit" 
                 disabled={!selectedActivity || requestLoading}
-                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 transition-all shadow-md shadow-blue-600/20 text-sm"
+                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 transition-all shadow-md shadow-blue-600/20 text-xs"
               >
                 {requestLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'إرسال الطلب للخادم'}
               </button>

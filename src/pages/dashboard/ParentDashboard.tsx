@@ -1,11 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, query, where, onSnapshot, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
   Star, History, Trophy, User, CreditCard, CheckCircle2, 
-  AlertCircle, Phone, Award, Shield, HeartHandshake, Sparkles
+  AlertCircle, Phone, Award, Shield, HeartHandshake, Sparkles,
+  TrendingUp, CalendarCheck, BarChart3
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend
+} from 'recharts';
 import clsx from 'clsx';
 import { SubscriptionRecord } from '../../types';
 
@@ -20,8 +31,11 @@ export const ParentDashboard = () => {
   const [childData, setChildData] = useState<any>(null);
   const [assistantData, setAssistantData] = useState<any>(null);
   const [pointsLog, setPointsLog] = useState<any[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [team, setTeam] = useState<any>(null);
   const [subscription, setSubscription] = useState<SubscriptionRecord | null>(null);
+  const [loadingChild, setLoadingChild] = useState(true);
+  const [resolvedDeaconId, setResolvedDeaconId] = useState<string | null>(userData?.parentOfDeaconId || null);
   
   const now = new Date();
   const currentMonthNum = now.getMonth() + 1;
@@ -29,11 +43,57 @@ export const ParentDashboard = () => {
   const currentYear = now.getFullYear();
   const currentMonthKey = `${currentYear}-${String(currentMonthNum).padStart(2, '0')}`;
 
+  // Resolve deacon ID either from parentOfDeaconId or from p_<username> convention
   useEffect(() => {
-    if (!userData?.parentOfDeaconId) return;
+    let isMounted = true;
+
+    async function resolveDeacon() {
+      if (userData?.parentOfDeaconId) {
+        setResolvedDeaconId(userData.parentOfDeaconId);
+        return;
+      }
+
+      if (userData?.username && userData.username.startsWith('p_')) {
+        const deaconUsername = userData.username.substring(2);
+        try {
+          const qDeacon = query(
+            collection(db, 'users'),
+            where('role', '==', 'deacon'),
+            where('username', '==', deaconUsername)
+          );
+          const snap = await getDocs(qDeacon);
+          if (!snap.empty && isMounted) {
+            const deaconDoc = snap.docs[0];
+            const dId = deaconDoc.id;
+            setResolvedDeaconId(dId);
+
+            // Auto-update parent document for future fast lookup
+            if (userData.id) {
+              await updateDoc(doc(db, 'users', userData.id), {
+                parentOfDeaconId: dId
+              }).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.error('Failed to resolve deacon by username:', e);
+        }
+      }
+    }
+
+    resolveDeacon();
+    return () => { isMounted = false; };
+  }, [userData]);
+
+  useEffect(() => {
+    if (!resolvedDeaconId) {
+      setLoadingChild(false);
+      return;
+    }
+
+    setLoadingChild(true);
 
     // Fetch Child User Data
-    const childRef = doc(db, 'users', userData.parentOfDeaconId);
+    const childRef = doc(db, 'users', resolvedDeaconId);
     getDoc(childRef).then(async snap => {
       if (snap.exists()) {
         const data: any = { id: snap.id, ...snap.data() };
@@ -53,10 +113,11 @@ export const ParentDashboard = () => {
           });
         }
       }
-    });
+      setLoadingChild(false);
+    }).catch(() => setLoadingChild(false));
 
     // Fetch Subscription status for current month
-    const subDocId = `${userData.parentOfDeaconId}_${currentMonthKey}`;
+    const subDocId = `${resolvedDeaconId}_${currentMonthKey}`;
     const unsubSub = onSnapshot(doc(db, 'subscriptions', subDocId), (docSnap) => {
       if (docSnap.exists()) {
         setSubscription(docSnap.data() as SubscriptionRecord);
@@ -66,35 +127,79 @@ export const ParentDashboard = () => {
     });
 
     // Fetch Points Log for Child
-    const qPoints = query(collection(db, 'points_log'), where('deaconId', '==', userData.parentOfDeaconId));
+    const qPoints = query(collection(db, 'points_log'), where('deaconId', '==', resolvedDeaconId));
     const unsubPoints = onSnapshot(qPoints, (snapshot) => {
       const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       data.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setPointsLog(data);
     });
 
+    // Fetch Attendance records for child
+    const qAttendance = query(collection(db, 'attendance_records'), where('deaconId', '==', resolvedDeaconId));
+    const unsubAttendance = onSnapshot(qAttendance, (snapshot) => {
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAttendanceRecords(data);
+    });
+
     return () => {
       unsubSub();
       unsubPoints();
+      unsubAttendance();
     };
-  }, [userData, currentMonthKey]);
+  }, [resolvedDeaconId, currentMonthKey]);
 
-  if (!userData?.parentOfDeaconId) {
+  // Aggregate monthly activity & attendance data for LineChart
+  const attendanceChartData = useMemo(() => {
+    // Generate past 6 months list
+    const result = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const mNum = d.getMonth() + 1;
+      const mKey = `${d.getFullYear()}-${String(mNum).padStart(2, '0')}`;
+      const mName = MONTH_NAMES_AR[d.getMonth()];
+
+      const monthAtt = attendanceRecords.filter(r => {
+        const rDate = r.date || r.timestamp;
+        return rDate && rDate.startsWith(mKey);
+      });
+
+      const monthPts = pointsLog
+        .filter(l => l.monthKey === mKey)
+        .reduce((acc, curr) => acc + (curr.points || 0), 0);
+
+      // Estimated expected sessions per month ~ 6 (4 liturgies + 2 classes)
+      const expectedSessions = 6;
+      const attendedCount = monthAtt.length;
+      const absentCount = Math.max(0, expectedSessions - attendedCount);
+
+      result.push({
+        month: mName,
+        monthKey: mKey,
+        حضور: attendedCount,
+        غياب: absentCount,
+        نقاط: monthPts
+      });
+    }
+    return result;
+  }, [attendanceRecords, pointsLog]);
+
+  if (loadingChild) {
+    return (
+      <div className="flex items-center justify-center p-12 text-slate-500 text-sm">
+        جاري تحميل وتجهيز بيانات ابنك الشماس...
+      </div>
+    );
+  }
+
+  if (!resolvedDeaconId || !childData) {
     return (
       <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 text-center min-h-[40vh] flex flex-col items-center justify-center">
         <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mb-3 text-slate-400">
           <User className="w-7 h-7" />
         </div>
-        <h2 className="text-lg font-bold text-slate-800 mb-1">لم يتم ربط حسابك بشماس</h2>
+        <h2 className="text-lg font-bold text-slate-800 mb-1">لم يتم ربط حسابك بشماس حتى الآن</h2>
         <p className="text-slate-500 text-xs">يرجى التواصل مع إدارة الخورس لربط حسابك بابنك الشماس للمتابعة المستمرة.</p>
-      </div>
-    );
-  }
-
-  if (!childData) {
-    return (
-      <div className="flex items-center justify-center p-12 text-slate-500 text-sm">
-        جاري تحميل بيانات ابنك الشماس...
       </div>
     );
   }
@@ -212,6 +317,81 @@ export const ParentDashboard = () => {
           ) : (
             <p className="text-amber-800 font-medium">يمكنكم تسليم مبلغ الـ 30 جنيه مع ابنك للخادم المساعد المسؤول عنه بالخورس</p>
           )}
+        </div>
+      </div>
+
+      {/* 📈 LINE CHART: Attendance & Absence Trend Tracking */}
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-sm">مخطط التزام الحضور والغياب (Line Chart)</h3>
+              <p className="text-[11px] text-slate-400">متابعة بيانية لعدد مرات حضور الأنشطة والقداسات شهرياً</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs font-bold">
+            <span className="flex items-center gap-1.5 text-emerald-600">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+              الحضور
+            </span>
+            <span className="flex items-center gap-1.5 text-rose-500">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-400"></span>
+              الغياب المتوقع
+            </span>
+            <span className="flex items-center gap-1.5 text-blue-600">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+              النقاط
+            </span>
+          </div>
+        </div>
+
+        <div className="h-64 w-full pt-2" dir="ltr">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={attendanceChartData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis 
+                dataKey="month" 
+                tick={{ fontSize: 11, fill: '#64748b' }} 
+                axisLine={{ stroke: '#e2e8f0' }} 
+              />
+              <YAxis 
+                tick={{ fontSize: 11, fill: '#64748b' }} 
+                axisLine={{ stroke: '#e2e8f0' }} 
+              />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#ffffff', borderRadius: '16px', border: '1px solid #e2e8f0', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} 
+              />
+              <Legend 
+                wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} 
+              />
+              <Line 
+                type="monotone" 
+                dataKey="حضور" 
+                stroke="#10b981" 
+                strokeWidth={3} 
+                dot={{ r: 4, fill: '#10b981' }} 
+                activeDot={{ r: 6 }} 
+              />
+              <Line 
+                type="monotone" 
+                dataKey="غياب" 
+                stroke="#f43f5e" 
+                strokeWidth={2} 
+                strokeDasharray="4 4"
+                dot={{ r: 3, fill: '#f43f5e' }} 
+              />
+              <Line 
+                type="monotone" 
+                dataKey="نقاط" 
+                stroke="#3b82f6" 
+                strokeWidth={2} 
+                dot={{ r: 3, fill: '#3b82f6' }} 
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
 

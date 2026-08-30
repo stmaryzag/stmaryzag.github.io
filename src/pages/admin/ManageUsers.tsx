@@ -5,10 +5,16 @@ import { createAuthUser } from '../../lib/adminAuth';
 import { 
   Users, Plus, Loader2, User, Search, Edit3, CheckCircle, 
   AlertCircle, Download, Phone, MapPin, Calendar, FileSpreadsheet,
-  UploadCloud, Copy, Check, ShieldCheck
+  UploadCloud, Copy, Check, ShieldCheck, HeartHandshake, Sparkles, Link2
 } from 'lucide-react';
 import { Role, UserData } from '../../types';
 import { parseExcelFile, ParsedDeaconRow } from '../../utils/excelImport';
+import { 
+  createAndLinkParentAccount, 
+  extractParentName, 
+  generateParentUsername, 
+  ParentCreationResult 
+} from '../../utils/parentGenerator';
 
 export const ManageUsers = () => {
   const [users, setUsers] = useState<UserData[]>([]);
@@ -26,10 +32,17 @@ export const ManageUsers = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Role>('deacon');
+  const [selectedParentOfDeaconId, setSelectedParentOfDeaconId] = useState('');
 
   // Edit user state
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+
+  // Auto Parent Generation State
+  const [generatingParents, setGeneratingParents] = useState(false);
+  const [parentGenResults, setParentGenResults] = useState<ParentCreationResult[]>([]);
+  const [showParentGenModal, setShowParentGenModal] = useState(false);
+  const [copiedParentCreds, setCopiedParentCreds] = useState(false);
 
   // Excel Bulk Import Modal State
   const [showExcelModal, setShowExcelModal] = useState(false);
@@ -37,6 +50,7 @@ export const ManageUsers = () => {
   const [excelFileName, setExcelFileName] = useState('');
   const [parsingExcel, setParsingExcel] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [autoCreateParentsOnImport, setAutoCreateParentsOnImport] = useState(true);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [importLogs, setImportLogs] = useState<string[]>([]);
   const [importFinished, setImportFinished] = useState(false);
@@ -91,14 +105,33 @@ export const ManageUsers = () => {
         areaId: '',
         teamId: '',
         assignedAssistantId: '',
+        parentOfDeaconId: role === 'parent' ? selectedParentOfDeaconId : '',
         tempPassword: password
       });
+
+      // If adding a deacon, auto-create their parent account right away
+      if (role === 'deacon') {
+        try {
+          const newDeaconData: UserData = {
+            id: authUser.uid,
+            username: username.trim(),
+            role: 'deacon',
+            fullName: fullName.trim(),
+            createdAt: new Date().toISOString(),
+            tempPassword: password
+          };
+          await createAndLinkParentAccount(newDeaconData, users);
+        } catch (pErr) {
+          console.warn('Auto parent creation notice:', pErr);
+        }
+      }
 
       setSuccessMsg(`تم إنشاء حساب ${fullName} بنجاح كـ ${getRoleName(role)}`);
       setFullName('');
       setUsername('');
       setPassword('');
       setRole('deacon');
+      setSelectedParentOfDeaconId('');
       setShowAddForm(false);
     } catch (err: any) {
       console.error(err);
@@ -131,7 +164,8 @@ export const ManageUsers = () => {
         grade: editingUser.grade || '',
         areaId: editingUser.areaId || '',
         teamId: editingUser.teamId || '',
-        role: editingUser.role || 'deacon'
+        role: editingUser.role || 'deacon',
+        parentOfDeaconId: editingUser.parentOfDeaconId || ''
       });
       setSuccessMsg(`تم تحديث بيانات ${editingUser.fullName} بنجاح`);
       setEditingUser(null);
@@ -141,6 +175,69 @@ export const ManageUsers = () => {
     } finally {
       setEditLoading(false);
     }
+  };
+
+  // Generate & Link Parent Accounts for All Deacons
+  const handleAutoGenerateAllParents = async () => {
+    const deacons = users.filter(u => u.role === 'deacon');
+    if (deacons.length === 0) {
+      setError('لا يوجد شمامسة مسجلين لتوليد حسابات أولياء أمور لهم');
+      return;
+    }
+
+    setGeneratingParents(true);
+    setShowParentGenModal(true);
+    setParentGenResults([]);
+    const results: ParentCreationResult[] = [];
+
+    for (const deacon of deacons) {
+      try {
+        const res = await createAndLinkParentAccount(deacon, users);
+        results.push(res);
+      } catch (err: any) {
+        results.push({
+          deaconId: deacon.id,
+          deaconName: deacon.fullName,
+          parentName: extractParentName(deacon.fullName),
+          parentUsername: generateParentUsername(deacon.username),
+          parentPassword: '---',
+          status: 'failed',
+          message: err.message || 'فشل'
+        });
+      }
+      setParentGenResults([...results]);
+    }
+
+    setGeneratingParents(false);
+    setSuccessMsg(`اكتملت عملية فحص وتوليد حسابات أولياء الأمور لـ ${deacons.length} شماس بنجاح!`);
+  };
+
+  // Copy Parent Credentials to Clipboard
+  const handleCopyParentCredentials = () => {
+    const text = parentGenResults.map((r, idx) => 
+      `${idx + 1}. ولي أمر الشماس: ${r.deaconName}\n   - اسم ولي الأمر: ${r.parentName}\n   - اسم الدخول: ${r.parentUsername}\n   - كلمة المرور: ${r.parentPassword}\n   - الحالة: ${r.message}`
+    ).join('\n\n');
+
+    navigator.clipboard.writeText(text);
+    setCopiedParentCreds(true);
+    setTimeout(() => setCopiedParentCreds(false), 3000);
+  };
+
+  // Download CSV of Parent Credentials
+  const downloadParentCredentialsCSV = () => {
+    const header = "اسم الشماس,اسم ولي الامر,اسم الدخول,كلمة المرور,الحالة\n";
+    const rows = parentGenResults.map(r => 
+      `"${r.deaconName}","${r.parentName}","${r.parentUsername}","${r.parentPassword}","${r.message}"`
+    ).join("\n");
+
+    const blob = new Blob(["\uFEFF" + header + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `حسابات_أولياء_الأمور_${new Date().toLocaleDateString('ar-EG')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleDeleteUser = async (id: string, name: string) => {
@@ -206,7 +303,8 @@ export const ManageUsers = () => {
         }
 
         // Save in Firestore
-        await setDoc(doc(db, 'users', uid || `uid_${row.username}`), {
+        const deaconDocId = uid || `uid_${row.username}`;
+        const newDeaconDoc: any = {
           fullName: row.fullName,
           username: row.username,
           tempPassword: row.password,
@@ -224,9 +322,24 @@ export const ManageUsers = () => {
           teamId: '',
           assignedAssistantId: '',
           createdAt: new Date().toISOString()
-        }, { merge: true });
+        };
 
-        logs.push(`✅ ${row.fullName} (@${row.username}) -> تم الإنشاء والحفظ بنجاح`);
+        await setDoc(doc(db, 'users', deaconDocId), newDeaconDoc, { merge: true });
+        logs.push(`✅ ${row.fullName} (@${row.username}) -> تم إنشاء حساب الشماس`);
+
+        // Automatically create and link parent account if enabled
+        if (autoCreateParentsOnImport) {
+          try {
+            const deaconObj: UserData = {
+              id: deaconDocId,
+              ...newDeaconDoc
+            };
+            const parentRes = await createAndLinkParentAccount(deaconObj, users);
+            logs.push(`   👨‍👦 ${parentRes.message} (@${parentRes.parentUsername})`);
+          } catch (pErr: any) {
+            logs.push(`   ⚠️ تعذر إنشاء حساب ولي الأمر: ${pErr.message}`);
+          }
+        }
       } catch (err: any) {
         logs.push(`❌ ${row.fullName}: فشل الإنشاء (${err.message})`);
       }
@@ -333,6 +446,15 @@ export const ManageUsers = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={handleAutoGenerateAllParents}
+            disabled={generatingParents}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-sm disabled:opacity-50"
+          >
+            {generatingParents ? <Loader2 className="w-4 h-4 animate-spin" /> : <HeartHandshake className="w-4 h-4" />}
+            توليد وربط أولياء الأمور تلقائياً
+          </button>
+
           <button
             onClick={() => setShowExcelModal(true)}
             className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-sm"
@@ -453,6 +575,24 @@ export const ManageUsers = () => {
             </div>
           </div>
 
+          {role === 'parent' && (
+            <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-2xl">
+              <label className="block text-xs font-bold text-amber-900 mb-1 flex items-center gap-1.5">
+                <Link2 className="w-4 h-4 text-amber-700" /> ربط ولي الأمر بالشماس التابع له (الابن)
+              </label>
+              <select
+                value={selectedParentOfDeaconId}
+                onChange={e => setSelectedParentOfDeaconId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-white border border-amber-300 rounded-xl focus:outline-none focus:border-amber-500 text-sm font-medium"
+              >
+                <option value="">-- اختر الشماس المرتبط بهذا الحساب --</option>
+                {users.filter(u => u.role === 'deacon').map(d => (
+                  <option key={d.id} value={d.id}>{d.fullName} (@{d.username})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
@@ -508,6 +648,15 @@ export const ManageUsers = () => {
           const userArea = areas.find(a => a.id === u.areaId)?.name;
           const userTeam = teams.find(t => t.id === u.teamId)?.name;
 
+          // Find linked parent or linked deacon
+          const linkedParent = u.role === 'deacon'
+            ? users.find(p => p.role === 'parent' && (p.parentOfDeaconId === u.id || p.username === generateParentUsername(u.username)))
+            : null;
+          
+          const linkedDeacon = u.role === 'parent' && u.parentOfDeaconId
+            ? users.find(d => d.id === u.parentOfDeaconId)
+            : null;
+
           return (
             <div key={u.id} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between hover:border-slate-200 transition-colors">
               <div>
@@ -531,6 +680,43 @@ export const ManageUsers = () => {
                 </div>
 
                 <div className="space-y-1.5 text-xs text-slate-600 bg-slate-50 p-3 rounded-2xl mb-3">
+                  {/* Linked Relations display */}
+                  {u.role === 'deacon' && (
+                    <div className="p-2 bg-indigo-50/70 rounded-xl text-indigo-900 flex items-center justify-between gap-2 border border-indigo-100/70">
+                      <div className="flex items-center gap-1.5 overflow-hidden">
+                        <HeartHandshake className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        <span className="truncate">
+                          ولي الأمر: <span className="font-bold">{linkedParent ? linkedParent.fullName : 'غير مرتبط'}</span>
+                        </span>
+                      </div>
+                      {!linkedParent && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const res = await createAndLinkParentAccount(u, users);
+                              setSuccessMsg(res.message);
+                            } catch (e: any) {
+                              setError(e.message);
+                            }
+                          }}
+                          className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold shrink-0 shadow-xs"
+                        >
+                          توليد
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {u.role === 'parent' && (
+                    <div className="p-2 bg-amber-50/80 rounded-xl text-amber-900 flex items-center gap-1.5 border border-amber-200/60">
+                      <Link2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span className="truncate">
+                        الشماس التابع له: <span className="font-bold">{linkedDeacon ? linkedDeacon.fullName : (u.parentOfDeaconId ? 'معرف غير متاح' : 'لم يتم الربط بعد')}</span>
+                      </span>
+                    </div>
+                  )}
+
                   {u.birthDate && (
                     <div className="flex items-center gap-2">
                       <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -636,6 +822,22 @@ export const ManageUsers = () => {
             {parsingExcel && (
               <div className="flex items-center justify-center gap-2 text-emerald-700 py-3 text-sm font-bold">
                 <Loader2 className="w-5 h-5 animate-spin" /> جاري قراءة وتجهيز البيانات وتوليد الحسابات...
+              </div>
+            )}
+
+            {/* Options Checkbox */}
+            {parsedRows.length > 0 && !importFinished && (
+              <div className="p-3.5 bg-indigo-50/70 border border-indigo-100 rounded-2xl flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="autoParentsCheckbox"
+                  checked={autoCreateParentsOnImport}
+                  onChange={e => setAutoCreateParentsOnImport(e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 rounded-md focus:ring-indigo-500 cursor-pointer"
+                />
+                <label htmlFor="autoParentsCheckbox" className="text-xs font-bold text-indigo-950 cursor-pointer select-none">
+                  توليد وربط حسابات أولياء الأمور تلقائياً لكل الشمامسة أثناء الاستيراد (استخراج اسم الأب والجد وتعيين كلمة مرور مبدئية)
+                </label>
               </div>
             )}
 
@@ -846,18 +1048,52 @@ export const ManageUsers = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">الصف الدراسي</label>
-                  <input
-                    type="text"
-                    value={editingUser.grade || ''}
-                    onChange={e => setEditingUser({ ...editingUser, grade: e.target.value })}
-                    placeholder="أولى إعدادي..."
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-                  />
+                  <label className="block text-xs font-medium text-slate-600 mb-1">الدور (Role)</label>
+                  <select
+                    value={editingUser.role || 'deacon'}
+                    onChange={e => setEditingUser({ ...editingUser, role: e.target.value as Role })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="deacon">شماس</option>
+                    <option value="assistant">مساعد (خادم)</option>
+                    <option value="parent">ولي أمر</option>
+                    <option value="admin">أدمن (مدير)</option>
+                  </select>
                 </div>
 
+                {editingUser.role === 'parent' ? (
+                  <div>
+                    <label className="block text-xs font-bold text-amber-900 mb-1 flex items-center gap-1">
+                      <Link2 className="w-3.5 h-3.5 text-amber-600" /> الشماس التابع له (الابن)
+                    </label>
+                    <select
+                      value={editingUser.parentOfDeaconId || ''}
+                      onChange={e => setEditingUser({ ...editingUser, parentOfDeaconId: e.target.value })}
+                      className="w-full px-3 py-2 bg-amber-50 border border-amber-300 rounded-xl text-xs font-bold text-amber-900 focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="">-- اختر الشماس المرتبط --</option>
+                      {users.filter(u => u.role === 'deacon').map(d => (
+                        <option key={d.id} value={d.id}>{d.fullName} (@{d.username})</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">الصف الدراسي</label>
+                    <input
+                      type="text"
+                      value={editingUser.grade || ''}
+                      onChange={e => setEditingUser({ ...editingUser, grade: e.target.value })}
+                      placeholder="أولى إعدادي..."
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">المنطقة</label>
                   <select
@@ -904,6 +1140,113 @@ export const ManageUsers = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Parent Generation Results Modal */}
+      {showParentGenModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 md:p-8 space-y-5 my-8 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <HeartHandshake className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-lg">توليد وربط حسابات أولياء الأمور تلقائياً</h3>
+                  <p className="text-xs text-slate-500">
+                    تم استخراج أسماء الآباء وتوليد الحسابات وربطها بالشمامسة
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowParentGenModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {generatingParents ? (
+              <div className="py-12 text-center space-y-3">
+                <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto" />
+                <p className="text-sm font-bold text-slate-700">جاري فحص وتوليد حسابات أولياء الأمور لجميع الشمامسة في قاعدة البيانات...</p>
+                <p className="text-xs text-slate-500">يرجى الانتظار ثوانٍ قليلة</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">
+                    نتائج العملية (<span className="text-indigo-600">{parentGenResults.length}</span> حساب):
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCopyParentCredentials}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      {copiedParentCreds ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedParentCreds ? 'تم النسخ!' : 'نسخ البيانات'}
+                    </button>
+                    <button
+                      onClick={downloadParentCredentialsCSV}
+                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      تصدير Excel/CSV
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-2xl">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-50 text-slate-600 sticky top-0 border-b">
+                      <tr>
+                        <th className="p-2.5">#</th>
+                        <th className="p-2.5">الشماس</th>
+                        <th className="p-2.5">ولي الأمر المستخرج</th>
+                        <th className="p-2.5">اسم الدخول</th>
+                        <th className="p-2.5">كلمة المرور</th>
+                        <th className="p-2.5">الحالة</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {parentGenResults.map((r, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-2.5 text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="p-2.5 font-bold text-slate-800">{r.deaconName}</td>
+                          <td className="p-2.5 text-indigo-900 font-medium">{r.parentName}</td>
+                          <td className="p-2.5 font-mono text-blue-600" dir="ltr">{r.parentUsername}</td>
+                          <td className="p-2.5 font-mono text-emerald-700 bg-emerald-50/50" dir="ltr">{r.parentPassword}</td>
+                          <td className="p-2.5">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                              r.status === 'created' ? 'bg-emerald-100 text-emerald-800' :
+                              r.status === 'linked' ? 'bg-blue-100 text-blue-800' :
+                              r.status === 'skipped' ? 'bg-slate-100 text-slate-700' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {r.status === 'created' ? 'تم الإنشاء' :
+                               r.status === 'linked' ? 'تم الربط' :
+                               r.status === 'skipped' ? 'مرتبط مسبقاً' : 'فشل'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-4 border-t">
+              <button
+                type="button"
+                onClick={() => setShowParentGenModal(false)}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}

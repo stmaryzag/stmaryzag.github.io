@@ -119,14 +119,19 @@ export const ManageRequests = () => {
                 )}
                 <div>
                   <h3 className="font-bold text-slate-800 text-lg">{user?.fullName || 'شماس'}</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-sm text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-lg">
-                      {activity?.name || 'نشاط غير معروف'}
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2.5 py-0.5 rounded-lg border border-blue-100">
+                      {activity?.name || req.activityName || 'نشاط غير معروف'} (+{activity?.defaultPoints || 0} نقطة)
                     </span>
-                    <span className="text-xs text-slate-500">
+                    <span className="text-[11px] text-slate-500">
                       {new Date(req.date).toLocaleDateString('ar-EG', { weekday: 'long', hour: 'numeric', minute: 'numeric' })}
                     </span>
                   </div>
+                  {req.notes && (
+                    <p className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1 mt-1.5 font-medium">
+                      📝 {req.notes}
+                    </p>
+                  )}
                 </div>
               </div>
               

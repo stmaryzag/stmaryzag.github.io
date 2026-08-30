@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Users, MapPin, Trophy, Activity, ChevronLeft, Clock, Star, Medal, 
   Phone, Bell, CreditCard, Cake, Sparkles, Send, CheckCircle2,
-  AlertCircle, Award
+  AlertCircle, Award, UserCheck
 } from 'lucide-react';
 import { collection, query, where, onSnapshot, addDoc, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -123,6 +123,14 @@ export const AdminDashboard = () => {
   };
 
   const sections = [
+    {
+      title: 'تسجيل الحضور السريع والجماعي',
+      desc: 'تحضير الشمامسة بنقرة واحدة وتوزيع نقاط القداسات والأنشطة',
+      icon: UserCheck,
+      color: 'bg-teal-600',
+      badge: 'جديد وسريع',
+      path: '/admin/attendance'
+    },
     {
       title: 'الاشتراكات الشهرية (30 ج)',
       desc: 'متابعة وتسجيل دفع 30 جنيه شهرياً لكل شماس',
