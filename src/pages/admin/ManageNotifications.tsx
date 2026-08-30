@@ -10,6 +10,7 @@ import {
   Plus, Trash2, Edit3, Power, Sparkles, RefreshCcw, Check, ToggleLeft, ToggleRight
 } from 'lucide-react';
 import { RecurringNotification } from '../../types';
+import { sendOneSignalPush } from '../../utils/onesignal';
 
 const DAYS_OF_WEEK = [
   { val: 0, label: 'الأحد' },
@@ -181,6 +182,24 @@ export const ManageNotifications = () => {
           });
         }
 
+        // Send push notification to OneSignal
+        if (notif.audience === 'all') {
+          sendOneSignalPush({
+            title: notif.title,
+            body: notif.body,
+            includedSegments: ['Subscribers']
+          }).catch(console.error);
+        } else {
+          const targetIds = targets.map((u: any) => u.id).filter(Boolean);
+          if (targetIds.length > 0) {
+            sendOneSignalPush({
+              title: notif.title,
+              body: notif.body,
+              externalUserIds: targetIds
+            }).catch(console.error);
+          }
+        }
+
         await updateDoc(doc(db, 'notifications_scheduled', notif.id), {
           sent: true,
           actualSentAt: nowIso
@@ -217,6 +236,24 @@ export const ManageNotifications = () => {
               read: false,
               isRecurring: true
             });
+          }
+
+          // Send push notification to OneSignal
+          if (rec.audience === 'all') {
+            sendOneSignalPush({
+              title: rec.title,
+              body: rec.body,
+              includedSegments: ['Subscribers']
+            }).catch(console.error);
+          } else {
+            const targetIds = targets.map((u: any) => u.id).filter(Boolean);
+            if (targetIds.length > 0) {
+              sendOneSignalPush({
+                title: rec.title,
+                body: rec.body,
+                externalUserIds: targetIds
+              }).catch(console.error);
+            }
           }
 
           if (rec.id) {
@@ -339,6 +376,24 @@ export const ManageNotifications = () => {
           createdAt: nowIso,
           read: false
         });
+      }
+
+      // Send Instant Push via OneSignal
+      if (audience === 'all') {
+        await sendOneSignalPush({
+          title: title.trim(),
+          body: body.trim(),
+          includedSegments: ['Subscribers']
+        });
+      } else {
+        const targetIds = targets.map(u => u.id).filter(Boolean);
+        if (targetIds.length > 0) {
+          await sendOneSignalPush({
+            title: title.trim(),
+            body: body.trim(),
+            externalUserIds: targetIds
+          });
+        }
       }
 
       setTitle('');

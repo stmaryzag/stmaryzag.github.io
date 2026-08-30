@@ -112,6 +112,7 @@ export const isPushPermissionGranted = (): boolean => {
 export const sendOneSignalPush = async (params: {
   externalUserIds?: string[];
   includedSegments?: string[];
+  filters?: any[];
   title: string;
   body: string;
   url?: string;
@@ -132,14 +133,19 @@ export const sendOneSignalPush = async (params: {
       payload.data = params.data;
     }
 
-    if (params.externalUserIds && params.externalUserIds.length > 0) {
-      // OneSignal external user ID targeting
+    if (params.filters && params.filters.length > 0) {
+      payload.filters = params.filters;
+    } else if (params.externalUserIds && params.externalUserIds.length > 0) {
+      // Target specific external user IDs
       payload.include_external_user_ids = params.externalUserIds;
+      payload.channel_for_external_user_ids = 'push';
     } else if (params.includedSegments && params.includedSegments.length > 0) {
       payload.included_segments = params.includedSegments;
     } else {
-      payload.included_segments = ['Subscribers', 'All'];
+      payload.included_segments = ['Subscribers'];
     }
+
+    console.log('🚀 Sending OneSignal Push:', payload);
 
     const response = await fetch('https://onesignal.com/api/v1/notifications', {
       method: 'POST',
@@ -151,10 +157,10 @@ export const sendOneSignalPush = async (params: {
     });
 
     const result = await response.json();
-    console.log('OneSignal Push Send Result:', result);
+    console.log('✅ OneSignal Push Send Result:', result);
     return result;
   } catch (err) {
-    console.error('Error in sendOneSignalPush:', err);
+    console.error('❌ Error in sendOneSignalPush:', err);
     return null;
   }
 };
