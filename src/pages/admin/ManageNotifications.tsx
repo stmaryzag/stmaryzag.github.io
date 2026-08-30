@@ -379,8 +379,9 @@ export const ManageNotifications = () => {
       }
 
       // Send Instant Push via OneSignal
+      let pushRes: any = null;
       if (audience === 'all') {
-        await sendOneSignalPush({
+        pushRes = await sendOneSignalPush({
           title: title.trim(),
           body: body.trim(),
           includedSegments: ['Subscribers']
@@ -388,7 +389,7 @@ export const ManageNotifications = () => {
       } else {
         const targetIds = targets.map(u => u.id).filter(Boolean);
         if (targetIds.length > 0) {
-          await sendOneSignalPush({
+          pushRes = await sendOneSignalPush({
             title: title.trim(),
             body: body.trim(),
             externalUserIds: targetIds
@@ -396,10 +397,18 @@ export const ManageNotifications = () => {
         }
       }
 
+      console.log('Push dispatch feedback:', pushRes);
+
       setTitle('');
       setBody('');
       setSpecificUserId('');
-      setSuccessMsg(`تم إرسال الإشعار فوراً إلى ${targets.length} مستخدم بنجاح! 🚀`);
+
+      const recipients = pushRes?.result?.recipients ?? pushRes?.recipients;
+      if (recipients === 0) {
+        setSuccessMsg(`تم حفظ الإشعار بالصندوق، ولكن لم يوجد أجهزة مشتركة حالياً في OneSignal بانتظار الإشعار. يرجى الضغط على "تفعيل الإشعارات" في الموبايل أولاً.`);
+      } else {
+        setSuccessMsg(`تم إرسال الإشعار بنجاح لـ ${recipients ? recipients + ' جهاز' : targets.length + ' مستخدم'}! 🚀`);
+      }
     } catch (err: any) {
       console.error(err);
       setErrorMsg('حدث خطأ أثناء الإرسال: ' + err.message);

@@ -18,7 +18,7 @@ export const initOneSignal = async (): Promise<boolean> => {
         appId: ONESIGNAL_APP_ID,
         allowLocalhostAsSecureOrigin: true,
         autoResubscribe: false,
-        serviceWorkerPath: 'OneSignalSDKWorker.js',
+        serviceWorkerPath: '/OneSignalSDKWorker.js',
         serviceWorkerParam: { scope: '/' },
       });
       isInitialized = true;
@@ -150,12 +150,11 @@ export const sendOneSignalPush = async (params: {
       payload.filters = params.filters;
     } else if (params.externalUserIds && params.externalUserIds.length > 0) {
       payload.include_external_user_ids = params.externalUserIds;
-      payload.include_aliases = { external_id: params.externalUserIds };
       payload.channel_for_external_user_ids = 'push';
     } else if (params.includedSegments && params.includedSegments.length > 0) {
       payload.included_segments = params.includedSegments;
     } else {
-      payload.included_segments = ['Subscribers', 'Total Subscriptions', 'All'];
+      payload.included_segments = ['Subscribers'];
     }
 
     const response = await fetch('https://onesignal.com/api/v1/notifications', {

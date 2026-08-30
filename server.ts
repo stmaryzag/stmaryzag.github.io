@@ -28,20 +28,19 @@ async function startServer() {
       if (filters && filters.length > 0) {
         payload.filters = filters;
       } else if (externalUserIds && externalUserIds.length > 0) {
+        // Target specific user IDs registered with OneSignal login
         payload.include_external_user_ids = externalUserIds;
-        payload.include_aliases = { external_id: externalUserIds };
         payload.channel_for_external_user_ids = 'push';
-        payload.target_channel = 'push';
       } else if (includedSegments && includedSegments.length > 0) {
         payload.included_segments = includedSegments;
       } else {
-        payload.included_segments = ['Subscribers', 'Total Subscriptions', 'All'];
+        payload.included_segments = ['Subscribers'];
       }
 
       console.log('🚀 Express Server Sending OneSignal Push Payload:', payload);
 
-      // Call OneSignal REST API server-to-server
-      const response = await fetch('https://onesignal.com/api/v1/notifications', {
+      // Call OneSignal REST API server-to-server with 'Key' auth header
+      let response = await fetch('https://onesignal.com/api/v1/notifications', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
@@ -50,8 +49,25 @@ async function startServer() {
         body: JSON.stringify(payload)
       });
 
-      const result = await response.json();
-      console.log('✅ OneSignal Server Response:', result);
+      let result = await response.json();
+
+      // If 'Key' auth header returned 401 or errors, retry with 'Basic' auth header
+      if ((!response.ok || result?.errors) && ONESIGNAL_REST_API_KEY) {
+        console.warn('OneSignal returned warning with Key auth, trying Basic auth fallback...', result);
+        const fallbackResponse = await fetch('https://onesignal.com/api/v1/notifications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': `Basic ${ONESIGNAL_REST_API_KEY}`
+          },
+          body: JSON.stringify(payload)
+        });
+        if (fallbackResponse.ok) {
+          result = await fallbackResponse.json();
+        }
+      }
+
+      console.log('✅ OneSignal Server Final Response:', result);
 
       return res.json({ success: true, result });
     } catch (error: any) {
