@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, getDocs, addDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, addDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { CheckCircle2, UserCheck, Calendar, Filter, Search, CheckCheck, Loader2, Award, Clock } from 'lucide-react';
-import { UserData, ActivityType, SubscriptionRecord } from '../../types';
+import { CheckCircle2, UserCheck, Calendar, Filter, Search, CheckCheck, Loader2, Award } from 'lucide-react';
+import { UserData, ActivityType } from '../../types';
 
 export const FastAttendance = () => {
   const { userData } = useAuth();
@@ -104,6 +104,8 @@ export const FastAttendance = () => {
       if (!isAlreadyRecorded) {
         // Record attendance & add points
         const recordDate = `${selectedDate}T${new Date().toTimeString().slice(0, 8)}Z`;
+        const monthKey = selectedDate.slice(0, 7);
+
         await addDoc(collection(db, 'attendance_records'), {
           deaconId: deacon.id,
           activityTypeId: activeActivity.id,
@@ -117,28 +119,73 @@ export const FastAttendance = () => {
 
         await addDoc(collection(db, 'points_log'), {
           deaconId: deacon.id,
+          activityTypeId: activeActivity.id,
           reason: `حضور: ${activeActivity.name}`,
           points: activeActivity.defaultPoints || 0,
           date: recordDate,
           addedBy: userData?.id,
-          monthKey: selectedDate.slice(0, 7)
+          monthKey
         });
 
         setRecordedMap(prev => ({ ...prev, [deacon.id]: true }));
         setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${activeActivity.defaultPoints} نقطة)`);
       } else {
-        // Unmark (just update local state map or remove from current session)
+        // Unmark: Delete attendance record in Firestore and remove/deduct points
+        const qAtt = query(
+          collection(db, 'attendance_records'),
+          where('deaconId', '==', deacon.id),
+          where('activityTypeId', '==', activeActivity.id)
+        );
+        const attSnap = await getDocs(qAtt);
+        for (const d of attSnap.docs) {
+          const data = d.data();
+          if (data.date && data.date.startsWith(selectedDate)) {
+            await deleteDoc(doc(db, 'attendance_records', d.id));
+          }
+        }
+
+        // Delete matching points log entry for this activity and date
+        const qPts = query(
+          collection(db, 'points_log'),
+          where('deaconId', '==', deacon.id)
+        );
+        const ptsSnap = await getDocs(qPts);
+        let deletedPointsCount = 0;
+        for (const d of ptsSnap.docs) {
+          const data = d.data();
+          const matchesActivity = (data.activityTypeId === activeActivity.id) || 
+            (data.reason && data.reason.includes(activeActivity.name));
+          const matchesDate = (data.date && data.date.startsWith(selectedDate));
+          if (matchesActivity && matchesDate) {
+            deletedPointsCount += (data.points || 0);
+            await deleteDoc(doc(db, 'points_log', d.id));
+          }
+        }
+
+        // Fallback: If no exact matching points log was found, add a deduction record to balance
+        if (deletedPointsCount === 0 && (activeActivity.defaultPoints || 0) > 0) {
+          await addDoc(collection(db, 'points_log'), {
+            deaconId: deacon.id,
+            activityTypeId: activeActivity.id,
+            reason: `خصم لإلغاء حضور: ${activeActivity.name}`,
+            points: -(activeActivity.defaultPoints || 0),
+            date: new Date().toISOString(),
+            addedBy: userData?.id,
+            monthKey: selectedDate.slice(0, 7)
+          });
+        }
+
         setRecordedMap(prev => {
           const next = { ...prev };
           delete next[deacon.id];
           return next;
         });
-        setSuccessMsg(`تم إلغاء تحديد حضور ${deacon.fullName}`);
+        setSuccessMsg(`تم إلغاء حضور ${deacon.fullName} وخصم النقاط بنجاح (-${activeActivity.defaultPoints} نقطة)`);
       }
       setTimeout(() => setSuccessMsg(''), 2500);
     } catch (err: any) {
       console.error(err);
-      alert('حدث خطأ أثناء تسجيل الحضور: ' + err.message);
+      alert('حدث خطأ أثناء تعديل الحضور: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -262,7 +309,7 @@ export const FastAttendance = () => {
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                 <Filter className="w-4 h-4 text-indigo-600" />
-                تصفية حسب الخادم المساعد
+                تصفية حسب الخادم المسؤول
               </label>
               <select
                 value={filterAssistant}

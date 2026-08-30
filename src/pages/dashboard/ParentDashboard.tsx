@@ -250,7 +250,7 @@ export const ParentDashboard = () => {
             <p className="text-xs text-slate-500 mt-1 font-mono">@{childData?.username}</p>
             {assistantData && (
               <p className="text-xs text-blue-700 font-medium mt-1 flex items-center gap-1">
-                <span>الخادم المساعد المسؤول:</span>
+                <span>الخادم المسؤول:</span>
                 <strong className="text-slate-800">{assistantData.fullName}</strong>
                 {assistantData.ownPhone && (
                   <a href={`tel:${assistantData.ownPhone}`} className="text-blue-600 font-mono text-[11px] mr-1">
@@ -315,7 +315,7 @@ export const ParentDashboard = () => {
               <p className="text-[10px] text-slate-500">تم السداد للخادم: {subscription.recordedByName || 'المسؤول'}</p>
             </div>
           ) : (
-            <p className="text-amber-800 font-medium">يمكنكم تسليم مبلغ الـ 30 جنيه مع ابنك للخادم المساعد المسؤول عنه بالخورس</p>
+            <p className="text-amber-800 font-medium">يمكنكم تسليم مبلغ الـ 30 جنيه مع ابنك للخادم المسؤول عنه بالخورس</p>
           )}
         </div>
       </div>

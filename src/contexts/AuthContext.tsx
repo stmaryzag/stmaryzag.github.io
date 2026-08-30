@@ -152,6 +152,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setLoading(true);
       setCurrentUser(user);
       if (user) {
         await fetchUserData(user.uid, user);
@@ -167,11 +168,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = async (usernameOrEmail: string, password: string) => {
     const trimmed = usernameOrEmail.trim();
     const email = trimmed.includes('@') ? trimmed : `${trimmed}@deacons-app.local`;
-    await signInWithEmailAndPassword(auth, email, password);
+    setLoading(true);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      setCurrentUser(userCredential.user);
+      await fetchUserData(userCredential.user.uid, userCredential.user);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const logout = async () => {
+    setLoading(true);
     await signOut(auth);
+    setCurrentUser(null);
+    setUserData(null);
+    setLoading(false);
   };
 
   const reloadUserData = async () => {

@@ -410,7 +410,7 @@ export const ManageUsers = () => {
   const getRoleName = (r: string) => {
     switch (r) {
       case 'admin': return 'أدمن';
-      case 'assistant': return 'مساعد';
+      case 'assistant': return 'خادم';
       case 'parent': return 'ولي أمر';
       default: return 'شماس';
     }
@@ -568,7 +568,7 @@ export const ManageUsers = () => {
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 text-sm font-medium"
               >
                 <option value="deacon">شماس</option>
-                <option value="assistant">مساعد (خادم)</option>
+                <option value="assistant">خادم</option>
                 <option value="parent">ولي أمر</option>
                 <option value="admin">أدمن (مدير)</option>
               </select>
@@ -634,7 +634,7 @@ export const ManageUsers = () => {
             >
               <option value="all">كل الأدوار</option>
               <option value="deacon">الشمامسة فقط</option>
-              <option value="assistant">المساعدين</option>
+              <option value="assistant">الخُدام</option>
               <option value="parent">أولياء الأمور</option>
               <option value="admin">المدراء (Admins)</option>
             </select>
@@ -1057,7 +1057,7 @@ export const ManageUsers = () => {
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-500"
                   >
                     <option value="deacon">شماس</option>
-                    <option value="assistant">مساعد (خادم)</option>
+                    <option value="assistant">خادم</option>
                     <option value="parent">ولي أمر</option>
                     <option value="admin">أدمن (مدير)</option>
                   </select>

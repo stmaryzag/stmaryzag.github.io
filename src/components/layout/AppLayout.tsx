@@ -56,7 +56,7 @@ export const AppLayout = () => {
             <h1 className="font-extrabold text-slate-800 text-sm truncate">{userData?.fullName}</h1>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-[11px] font-bold px-2 py-0.2 rounded-full bg-indigo-50 text-indigo-700">
-                {userData?.role === 'deacon' ? 'شماس' : userData?.role === 'admin' ? 'أدمن النظام' : userData?.role === 'assistant' ? 'خادم مساعد' : 'ولي أمر'}
+                {userData?.role === 'deacon' ? 'شماس' : userData?.role === 'admin' ? 'أدمن النظام' : userData?.role === 'assistant' ? 'خادم' : 'ولي أمر'}
               </span>
               <span className="text-[10px] text-slate-400 font-mono hidden sm:inline" dir="ltr">@{userData?.username}</span>
             </div>

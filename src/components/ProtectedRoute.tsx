@@ -5,11 +5,11 @@ export const ProtectedRoute = () => {
   const { currentUser, userData, loading } = useAuth();
   const location = useLocation();
 
-  if (loading) {
+  if (loading || (currentUser && !userData)) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-600 gap-3">
-        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-        <p className="font-bold text-sm">جاري التحميل...</p>
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="font-bold text-sm text-slate-700">جاري تحميل الحساب...</p>
       </div>
     );
   }

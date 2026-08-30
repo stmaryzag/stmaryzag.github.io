@@ -153,7 +153,7 @@ export const ManageActivities = () => {
 
           <div className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-100">
             <div>
-              <p className="font-bold text-slate-800 text-xs">يطلب موافقة الأدمن / الخادم المساعد؟</p>
+              <p className="font-bold text-slate-800 text-xs">يطلب موافقة الأدمن / الخادم؟</p>
               <p className="text-[11px] text-slate-500">متاح لطلب الشماس بنفسه من لوحته ويحتاج تأكيد الخادم لاحتساب النقاط (مثل قداسات وسط الأسبوع وجلسات الاعتراف)</p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">

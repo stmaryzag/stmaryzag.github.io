@@ -82,7 +82,7 @@ export const Profile = () => {
   const getRoleName = (r?: string) => {
     switch (r) {
       case 'admin': return 'أدمن (مدير النظام)';
-      case 'assistant': return 'مساعد (أمين خدمة)';
+      case 'assistant': return 'خادم (أمين خدمة)';
       case 'parent': return 'ولي أمر';
       default: return 'شماس';
     }

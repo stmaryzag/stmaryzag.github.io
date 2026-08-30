@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, addDoc, onSnapshot, setDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, onSnapshot, setDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, CheckCircle, Clock, Search, Loader2, CreditCard, CheckCircle2, XCircle, UserCheck } from 'lucide-react';
+import { Users, CheckCircle, Clock, Loader2, CreditCard, CheckCircle2, XCircle, UserCheck, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SubscriptionRecord } from '../../types';
 
@@ -13,13 +13,15 @@ export const AssistantDashboard = () => {
   const [deacons, setDeacons] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<Record<string, SubscriptionRecord>>({});
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, boolean>>({});
   
   const [selectedActivity, setSelectedActivity] = useState('');
-  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceLoadingId, setAttendanceLoadingId] = useState<string | null>(null);
   const [subLoading, setSubLoading] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
 
   const now = new Date();
+  const todayDateStr = now.toISOString().slice(0, 10);
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   // Fetch Deacons & Activities
@@ -39,7 +41,11 @@ export const AssistantDashboard = () => {
     // Fetch active activities
     const qActivities = query(collection(db, 'activity_types'), where('active', '==', true));
     const unsubActivities = onSnapshot(qActivities, (snap) => {
-      setActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const acts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setActivities(acts);
+      if (acts.length > 0 && !selectedActivity) {
+        setSelectedActivity(acts[0].id);
+      }
     });
 
     // Fetch subscriptions for current month
@@ -60,44 +66,127 @@ export const AssistantDashboard = () => {
     };
   }, [userData, currentMonthKey]);
 
-  const handleRecordAttendance = async (deaconId: string) => {
+  // Fetch today's attendance for selected activity
+  useEffect(() => {
+    if (!selectedActivity) return;
+    const fetchTodayAttendance = async () => {
+      try {
+        const q = query(
+          collection(db, 'attendance_records'),
+          where('activityTypeId', '==', selectedActivity)
+        );
+        const snap = await getDocs(q);
+        const map: Record<string, boolean> = {};
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (data.date && data.date.startsWith(todayDateStr)) {
+            map[data.deaconId] = true;
+          }
+        });
+        setAttendanceMap(map);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchTodayAttendance();
+  }, [selectedActivity, todayDateStr]);
+
+  const handleToggleAttendance = async (deacon: any) => {
     if (!selectedActivity) {
       alert('يرجى اختيار النشاط أولاً');
       return;
     }
 
-    setAttendanceLoading(true);
+    setAttendanceLoadingId(deacon.id);
+    const isAttended = !!attendanceMap[deacon.id];
+    const activity = activities.find(a => a.id === selectedActivity);
+    const points = activity?.defaultPoints || 0;
+
     try {
-      const activity = activities.find(a => a.id === selectedActivity);
-      const points = activity?.defaultPoints || 0;
-      
-      // Add Attendance Record
-      await addDoc(collection(db, 'attendance_records'), {
-        deaconId,
-        activityTypeId: selectedActivity,
-        date: new Date().toISOString(),
-        status: 'confirmed',
-        recordedBy: userData?.id,
-        timestamp: new Date().toISOString()
-      });
+      if (!isAttended) {
+        // Record Attendance & Points
+        const recordDate = `${todayDateStr}T${new Date().toTimeString().slice(0, 8)}Z`;
+        await addDoc(collection(db, 'attendance_records'), {
+          deaconId: deacon.id,
+          activityTypeId: selectedActivity,
+          activityName: activity?.name || 'نشاط',
+          date: recordDate,
+          status: 'confirmed',
+          recordedBy: userData?.id,
+          recordedByName: userData?.fullName || 'الخادم',
+          timestamp: new Date().toISOString()
+        });
 
-      // Add Points Log
-      await addDoc(collection(db, 'points_log'), {
-        deaconId,
-        reason: `حضور: ${activity?.name || 'نشاط'}`,
-        points,
-        date: new Date().toISOString(),
-        addedBy: userData?.id,
-        monthKey: currentMonthKey
-      });
+        await addDoc(collection(db, 'points_log'), {
+          deaconId: deacon.id,
+          activityTypeId: selectedActivity,
+          reason: `حضور: ${activity?.name || 'نشاط'}`,
+          points,
+          date: recordDate,
+          addedBy: userData?.id,
+          monthKey: currentMonthKey
+        });
 
-      setSuccessMsg('تم تسجيل الحضور والنقاط بنجاح');
+        setAttendanceMap(prev => ({ ...prev, [deacon.id]: true }));
+        setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${points} نقطة) ✅`);
+      } else {
+        // Cancel attendance: Delete attendance record & remove points log
+        const qAtt = query(
+          collection(db, 'attendance_records'),
+          where('deaconId', '==', deacon.id),
+          where('activityTypeId', '==', selectedActivity)
+        );
+        const attSnap = await getDocs(qAtt);
+        for (const d of attSnap.docs) {
+          const data = d.data();
+          if (data.date && data.date.startsWith(todayDateStr)) {
+            await deleteDoc(doc(db, 'attendance_records', d.id));
+          }
+        }
+
+        // Delete points log
+        const qPts = query(
+          collection(db, 'points_log'),
+          where('deaconId', '==', deacon.id)
+        );
+        const ptsSnap = await getDocs(qPts);
+        let deletedPointsCount = 0;
+        for (const d of ptsSnap.docs) {
+          const data = d.data();
+          const matchesAct = (data.activityTypeId === selectedActivity) || (data.reason && data.reason.includes(activity?.name));
+          const matchesDate = data.date && data.date.startsWith(todayDateStr);
+          if (matchesAct && matchesDate) {
+            deletedPointsCount += (data.points || 0);
+            await deleteDoc(doc(db, 'points_log', d.id));
+          }
+        }
+
+        if (deletedPointsCount === 0 && points > 0) {
+          await addDoc(collection(db, 'points_log'), {
+            deaconId: deacon.id,
+            activityTypeId: selectedActivity,
+            reason: `خصم لإلغاء حضور: ${activity?.name || 'نشاط'}`,
+            points: -points,
+            date: new Date().toISOString(),
+            addedBy: userData?.id,
+            monthKey: currentMonthKey
+          });
+        }
+
+        setAttendanceMap(prev => {
+          const next = { ...prev };
+          delete next[deacon.id];
+          return next;
+        });
+        setSuccessMsg(`تم إلغاء حضور ${deacon.fullName} وخصم النقاط بنجاح (-${points} نقطة)`);
+      }
+
       setTimeout(() => setSuccessMsg(''), 2500);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert('حدث خطأ أثناء تسجيل الحضور');
+      alert('حدث خطأ أثناء تعديل الحضور: ' + error.message);
     } finally {
-      setAttendanceLoading(false);
+      setAttendanceLoadingId(null);
     }
   };
 
@@ -117,7 +206,7 @@ export const AssistantDashboard = () => {
         paid: !isPaid,
         paidAt: !isPaid ? new Date().toISOString() : null,
         recordedBy: userData?.id,
-        recordedByName: userData?.fullName || 'المساعد'
+        recordedByName: userData?.fullName || 'الخادم'
       }, { merge: true });
 
       setSuccessMsg(isPaid ? `تم إلغاء سداد اشتراك ${deacon.fullName}` : `تم تسجيل دفع اشتراك 30 ج لـ ${deacon.fullName}`);
@@ -133,7 +222,7 @@ export const AssistantDashboard = () => {
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white p-6 rounded-3xl shadow-sm">
-        <h2 className="text-xl font-bold mb-1">لوحة تحكم الخادم المساعد</h2>
+        <h2 className="text-xl font-bold mb-1">لوحة تحكم الخادم</h2>
         <p className="text-blue-100 text-xs">تسجيل الحضور السريع، متابعة اشتراك الـ 30ج، وطلبات الأنشطة للشمامسة المخصصين لك.</p>
       </div>
 
@@ -206,6 +295,8 @@ export const AssistantDashboard = () => {
           {deacons.map(deacon => {
             const isSubPaid = !!subscriptions[deacon.id]?.paid;
             const isSubBusy = subLoading === deacon.id;
+            const isAttended = !!attendanceMap[deacon.id];
+            const isAttendanceBusy = attendanceLoadingId === deacon.id;
 
             return (
               <div key={deacon.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-slate-100 rounded-2xl hover:bg-slate-50 transition-colors gap-3">
@@ -254,14 +345,30 @@ export const AssistantDashboard = () => {
                     )}
                   </button>
 
-                  {/* Attendance button */}
+                  {/* Attendance toggle button with points deduction on cancel */}
                   <button
-                    onClick={() => handleRecordAttendance(deacon.id)}
-                    disabled={attendanceLoading || !selectedActivity}
-                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50 transition-colors shadow-xs"
+                    onClick={() => handleToggleAttendance(deacon)}
+                    disabled={isAttendanceBusy || !selectedActivity}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50 transition-colors shadow-xs ${
+                      isAttended
+                        ? 'bg-emerald-600 hover:bg-rose-600 text-white'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    }`}
+                    title={isAttended ? 'اضغط لإلغاء الحضور وخصم النقاط' : 'اضغط لتسجيل الحضور'}
                   >
-                    {attendanceLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
-                    تسجيل حضور
+                    {isAttendanceBusy ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : isAttended ? (
+                      <>
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        حاضر (إلغاء وخصم)
+                      </>
+                    ) : (
+                      <>
+                        <UserCheck className="w-3.5 h-3.5" />
+                        تسجيل حضور
+                      </>
+                    )}
                   </button>
                 </div>
               </div>

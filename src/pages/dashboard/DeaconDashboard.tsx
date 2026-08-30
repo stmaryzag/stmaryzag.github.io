@@ -410,7 +410,7 @@ export const DeaconDashboard = () => {
               <p className="text-[10px] text-slate-500">المستلم: {subscription.recordedByName || 'المسؤول'}</p>
             </div>
           ) : (
-            <p className="text-amber-800 font-medium">يرجى تسليم الـ 30 جنيه للخادم المساعد المسؤول عنك</p>
+            <p className="text-amber-800 font-medium">يرجى تسليم الـ 30 جنيه للخادم المسؤول عنك</p>
           )}
         </div>
       </div>

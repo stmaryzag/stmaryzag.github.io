@@ -848,7 +848,7 @@ export const ManageNotifications = () => {
                     <option value="">-- اختر المستخدم من القائمة --</option>
                     {allUsersList.map(u => (
                       <option key={u.id} value={u.id}>
-                        {u.fullName} (@{u.username}) - {u.role === 'deacon' ? 'شماس' : u.role === 'parent' ? 'ولي أمر' : u.role === 'assistant' ? 'خادم مساعد' : 'أدمن'}
+                        {u.fullName} (@{u.username}) - {u.role === 'deacon' ? 'شماس' : u.role === 'parent' ? 'ولي أمر' : u.role === 'assistant' ? 'خادم' : 'أدمن'}
                       </option>
                     ))}
                   </select>
