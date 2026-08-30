@@ -20,9 +20,17 @@ async function startServer() {
         app_id: ONESIGNAL_APP_ID,
         headings: { ar: title, en: title },
         contents: { ar: body, en: body },
+        // iOS specific badge updates
+        ios_badgeType: 'Increase',
+        ios_badgeCount: 1,
       };
 
-      if (url) payload.url = url;
+      // Always try to set a URL so tapping on mobile opens the PWA instead of doing nothing
+      const clickUrl = url || req.headers.origin || req.headers.referer;
+      if (clickUrl) {
+        payload.url = clickUrl;
+      }
+
       if (data) payload.data = data;
 
       if (filters && filters.length > 0) {
@@ -34,7 +42,7 @@ async function startServer() {
       } else if (includedSegments && includedSegments.length > 0) {
         payload.included_segments = includedSegments;
       } else {
-        payload.included_segments = ['Subscribers'];
+        payload.included_segments = ['Subscribed Users'];
       }
 
       console.log('🚀 Express Server Sending OneSignal Push Payload:', payload);
@@ -51,9 +59,9 @@ async function startServer() {
 
       let result = await response.json();
 
-      // If 'Key' auth header returned 401 or errors, retry with 'Basic' auth header
-      if ((!response.ok || result?.errors) && ONESIGNAL_REST_API_KEY) {
-        console.warn('OneSignal returned warning with Key auth, trying Basic auth fallback...', result);
+      // If 'Key' auth header returned 401 or 400 (auth issue), retry with 'Basic' auth header
+      if ((!response.ok) && ONESIGNAL_REST_API_KEY) {
+        console.warn('OneSignal returned non-200 with Key auth, trying Basic auth fallback...', result);
         const fallbackResponse = await fetch('https://onesignal.com/api/v1/notifications', {
           method: 'POST',
           headers: {

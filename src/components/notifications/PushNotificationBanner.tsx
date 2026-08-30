@@ -8,6 +8,7 @@ export const PushNotificationBanner: React.FC = () => {
   const [showBanner, setShowBanner] = useState(false);
   const [loading, setLoading] = useState(false);
   const [granted, setGranted] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     // If not logged in, don't show yet
@@ -38,6 +39,7 @@ export const PushNotificationBanner: React.FC = () => {
 
   const handleEnablePush = async () => {
     setLoading(true);
+    setErrorMsg('');
     try {
       const isOk = await requestPushPermission();
       if (isOk || isPushPermissionGranted()) {
@@ -45,9 +47,19 @@ export const PushNotificationBanner: React.FC = () => {
         setTimeout(() => {
           setShowBanner(false);
         }, 3000);
+      } else {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+        
+        if (isIOS && !isStandalone) {
+          setErrorMsg('أجهزة الآيفون تتطلب إضافة التطبيق للشاشة الرئيسية أولاً (Share -> Add to Home Screen) لتتمكن من تفعيل الإشعارات.');
+        } else {
+          setErrorMsg('يرجى السماح بالإشعارات من إعدادات المتصفح.');
+        }
       }
     } catch (e) {
       console.error(e);
+      setErrorMsg('حدث خطأ، تأكد من إعدادات المتصفح.');
     } finally {
       setLoading(false);
     }
@@ -92,6 +104,11 @@ export const PushNotificationBanner: React.FC = () => {
             <p className="text-xs text-indigo-100/90 mt-1 leading-relaxed max-w-xl">
               اضغط على "تفعيل الإشعارات" لتصلك تنبيهات سداد الاشتراكات (30ج)، نقاط الأنشطة، وتنبيهات الخورس في شريط إشعارات هاتفك مباشرة.
             </p>
+            {errorMsg && (
+              <p className="text-xs text-rose-300 font-bold mt-2 bg-rose-500/20 p-2 rounded-lg border border-rose-500/30">
+                ⚠️ {errorMsg}
+              </p>
+            )}
           </div>
         </div>
 

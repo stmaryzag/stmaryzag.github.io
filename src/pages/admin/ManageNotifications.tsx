@@ -384,7 +384,7 @@ export const ManageNotifications = () => {
         pushRes = await sendOneSignalPush({
           title: title.trim(),
           body: body.trim(),
-          includedSegments: ['Subscribers']
+          includedSegments: ['Subscribed Users']
         });
       } else {
         const targetIds = targets.map(u => u.id).filter(Boolean);
@@ -404,7 +404,10 @@ export const ManageNotifications = () => {
       setSpecificUserId('');
 
       const recipients = pushRes?.result?.recipients ?? pushRes?.recipients;
-      if (recipients === 0) {
+      const errors = pushRes?.result?.errors ?? pushRes?.errors;
+      const allPlayersNotSubscribed = Array.isArray(errors) && errors.includes('All included players are not subscribed');
+
+      if (recipients === 0 || allPlayersNotSubscribed) {
         setSuccessMsg(`تم حفظ الإشعار بالصندوق، ولكن لم يوجد أجهزة مشتركة حالياً في OneSignal بانتظار الإشعار. يرجى الضغط على "تفعيل الإشعارات" في الموبايل أولاً.`);
       } else {
         setSuccessMsg(`تم إرسال الإشعار بنجاح لـ ${recipients ? recipients + ' جهاز' : targets.length + ' مستخدم'}! 🚀`);

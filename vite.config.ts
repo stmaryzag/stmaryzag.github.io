@@ -12,7 +12,11 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'prompt',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg', 'OneSignalSDKWorker.js'],
+        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+        workbox: {
+          importScripts: ['https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js'],
+          navigateFallbackDenylist: [/^\/api/]
+        },
         manifest: {
           name: 'تطبيق الشمامسة',
           short_name: 'الشمامسة',
@@ -48,3 +52,4 @@ export default defineConfig(() => {
     },
   };
 });
+

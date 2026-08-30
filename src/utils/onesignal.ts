@@ -14,15 +14,21 @@ export const initOneSignal = async (): Promise<boolean> => {
 
   initPromise = (async () => {
     try {
+      // Safely determine base path to avoid 404s on GitHub Pages or nested paths
+      const basePath = (import.meta as any).env?.BASE_URL || '/';
+      // Use the Vite PWA generated sw.js which we injected OneSignal into
+      const swPath = `${basePath === './' ? '/' : basePath}sw.js`.replace(/\/\/+/g, '/');
+      const scopePath = basePath === './' ? '/' : basePath;
+
       await OneSignal.init({
         appId: ONESIGNAL_APP_ID,
         allowLocalhostAsSecureOrigin: true,
         autoResubscribe: false,
-        serviceWorkerPath: '/OneSignalSDKWorker.js',
-        serviceWorkerParam: { scope: '/' },
+        serviceWorkerPath: swPath,
+        serviceWorkerParam: { scope: scopePath },
       });
       isInitialized = true;
-      console.log('✅ OneSignal Web Push SDK Initialized successfully');
+      console.log(`✅ OneSignal Web Push SDK Initialized successfully with custom SW: ${swPath}`);
       return true;
     } catch (err) {
       console.warn('OneSignal init notice:', err);
@@ -154,7 +160,7 @@ export const sendOneSignalPush = async (params: {
     } else if (params.includedSegments && params.includedSegments.length > 0) {
       payload.included_segments = params.includedSegments;
     } else {
-      payload.included_segments = ['Subscribers'];
+      payload.included_segments = ['Subscribed Users'];
     }
 
     const response = await fetch('https://onesignal.com/api/v1/notifications', {
