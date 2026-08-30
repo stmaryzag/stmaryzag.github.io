@@ -12,7 +12,6 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'prompt',
-        workbox: { maximumFileSizeToCacheInBytes: 5242880 },
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg', 'OneSignalSDKWorker.js'],
         manifest: {
           name: 'تطبيق الشمامسة',
