@@ -184,19 +184,19 @@ export const ManageNotifications = () => {
 
         // Send push notification to OneSignal
         if (notif.audience === 'all') {
-          sendOneSignalPush({
+          await sendOneSignalPush({
             title: notif.title,
             body: notif.body,
-            includedSegments: ['Subscribers']
-          }).catch(console.error);
+            includedSegments: ['Subscribed Users']
+          });
         } else {
           const targetIds = targets.map((u: any) => u.id).filter(Boolean);
           if (targetIds.length > 0) {
-            sendOneSignalPush({
+            await sendOneSignalPush({
               title: notif.title,
               body: notif.body,
               externalUserIds: targetIds
-            }).catch(console.error);
+            });
           }
         }
 
@@ -240,19 +240,19 @@ export const ManageNotifications = () => {
 
           // Send push notification to OneSignal
           if (rec.audience === 'all') {
-            sendOneSignalPush({
+            await sendOneSignalPush({
               title: rec.title,
               body: rec.body,
-              includedSegments: ['Subscribers']
-            }).catch(console.error);
+              includedSegments: ['Subscribed Users']
+            });
           } else {
             const targetIds = targets.map((u: any) => u.id).filter(Boolean);
             if (targetIds.length > 0) {
-              sendOneSignalPush({
+              await sendOneSignalPush({
                 title: rec.title,
                 body: rec.body,
                 externalUserIds: targetIds
-              }).catch(console.error);
+              });
             }
           }
 

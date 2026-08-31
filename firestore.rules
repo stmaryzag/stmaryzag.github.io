@@ -80,8 +80,13 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 5. Structure & Settings (Areas, Teams, Activity Types, Winners)
+    // 5. Structure & Settings (Areas, Teams, Activity Types, Winners, System)
     // =========================================================================
+    match /system_settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isAssistant();
+    }
+    
     match /areas/{areaId} {
       allow read: if isSignedIn();
       allow write: if isAdmin() || isAssistant();
@@ -161,10 +166,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 10. Fallback Catch-All for Authenticated Operations
+    // 10. Fallback Catch-All for Authenticated Operations (REMOVED FOR SECURITY)
     // =========================================================================
-    match /{document=**} {
-      allow read, write: if isSignedIn();
-    }
   }
 }

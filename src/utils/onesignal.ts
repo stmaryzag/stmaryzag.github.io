@@ -1,8 +1,8 @@
 import OneSignal from 'react-onesignal';
 import { UserData } from '../types';
+import { auth } from '../lib/firebase';
 
 export const ONESIGNAL_APP_ID = '779cfd74-9eb2-4c11-94a2-495b0e084014';
-export const ONESIGNAL_REST_API_KEY = (import.meta as any).env?.VITE_ONESIGNAL_REST_API_KEY || ['os_v2_app', 'o6op25e6wjgbdffcjfnq4ccacq4qhmqaelpepqvppgx4stsxqthanxrkdxcsgixs3m27wbds7lzcodhxrkrbo4bbe4lpqkajjur7uqa'].join('_');
 
 let isInitialized = false;
 let initPromise: Promise<boolean> | null = null;
@@ -127,10 +127,17 @@ export const sendOneSignalPush = async (params: {
   try {
     console.log('🚀 Dispatching OneSignal Push request via backend proxy...');
     
+    // Get Firebase Auth token to authorize the request
+    const user = auth.currentUser;
+    const token = user ? await user.getIdToken() : '';
+    
     // Call server endpoint (avoids CORS and protects API keys)
     const res = await fetch('/api/onesignal/push', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
       body: JSON.stringify(params)
     });
 
@@ -141,40 +148,7 @@ export const sendOneSignalPush = async (params: {
     }
 
     console.warn('Backend proxy returned status:', res.status);
-    
-    // Fallback direct request if proxy route is unavailable
-    const payload: Record<string, any> = {
-      app_id: ONESIGNAL_APP_ID,
-      headings: { ar: params.title, en: params.title },
-      contents: { ar: params.body, en: params.body },
-    };
-
-    if (params.url) payload.url = params.url;
-    if (params.data) payload.data = params.data;
-
-    if (params.filters && params.filters.length > 0) {
-      payload.filters = params.filters;
-    } else if (params.externalUserIds && params.externalUserIds.length > 0) {
-      payload.include_external_user_ids = params.externalUserIds;
-      payload.channel_for_external_user_ids = 'push';
-    } else if (params.includedSegments && params.includedSegments.length > 0) {
-      payload.included_segments = params.includedSegments;
-    } else {
-      payload.included_segments = ['Subscribed Users'];
-    }
-
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Authorization': `Key ${ONESIGNAL_REST_API_KEY}`
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const result = await response.json();
-    console.log('✅ Direct OneSignal Push Result:', result);
-    return result;
+    throw new Error('Failed to dispatch push notification via backend proxy.');
   } catch (err) {
     console.error('❌ Error in sendOneSignalPush:', err);
     return null;

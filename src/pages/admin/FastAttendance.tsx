@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, getDocs, addDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, addDoc, setDoc, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { CheckCircle2, UserCheck, Calendar, Filter, Search, CheckCheck, Loader2, Award } from 'lucide-react';
@@ -20,6 +20,8 @@ export const FastAttendance = () => {
   const [loading, setLoading] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+
+  const [deaconLoading, setDeaconLoading] = useState<Record<string, boolean>>({});
 
   // 1. Fetch deacons & assistants & activities
   useEffect(() => {
@@ -97,16 +99,20 @@ export const FastAttendance = () => {
       return;
     }
 
+    if (deaconLoading[deacon.id]) return; // Prevent double clicks
+    
     const isAlreadyRecorded = !!recordedMap[deacon.id];
-    setLoading(true);
+    
+    setDeaconLoading(prev => ({ ...prev, [deacon.id]: true }));
 
     try {
       if (!isAlreadyRecorded) {
         // Record attendance & add points
         const recordDate = `${selectedDate}T${new Date().toTimeString().slice(0, 8)}Z`;
         const monthKey = selectedDate.slice(0, 7);
+        const uniqueRecordId = `${deacon.id}_${activeActivity.id}_${selectedDate}`;
 
-        await addDoc(collection(db, 'attendance_records'), {
+        await setDoc(doc(db, 'attendance_records', uniqueRecordId), {
           deaconId: deacon.id,
           activityTypeId: activeActivity.id,
           activityName: activeActivity.name,
@@ -117,7 +123,8 @@ export const FastAttendance = () => {
           timestamp: new Date().toISOString()
         });
 
-        await addDoc(collection(db, 'points_log'), {
+        const uniquePointsId = `att_pt_${deacon.id}_${activeActivity.id}_${selectedDate}`;
+        await setDoc(doc(db, 'points_log', uniquePointsId), {
           deaconId: deacon.id,
           activityTypeId: activeActivity.id,
           reason: `حضور: ${activeActivity.name}`,
@@ -131,6 +138,13 @@ export const FastAttendance = () => {
         setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${activeActivity.defaultPoints} نقطة)`);
       } else {
         // Unmark: Delete attendance record in Firestore and remove/deduct points
+        const uniqueRecordId = `${deacon.id}_${activeActivity.id}_${selectedDate}`;
+        const uniquePointsId = `att_pt_${deacon.id}_${activeActivity.id}_${selectedDate}`;
+        
+        await deleteDoc(doc(db, 'attendance_records', uniqueRecordId)).catch(() => {});
+        await deleteDoc(doc(db, 'points_log', uniquePointsId)).catch(() => {});
+        
+        // Also cleanup any old legacy records that might exist with random IDs to be safe
         const qAtt = query(
           collection(db, 'attendance_records'),
           where('deaconId', '==', deacon.id),
@@ -139,40 +153,24 @@ export const FastAttendance = () => {
         const attSnap = await getDocs(qAtt);
         for (const d of attSnap.docs) {
           const data = d.data();
-          if (data.date && data.date.startsWith(selectedDate)) {
+          if (data.date && data.date.startsWith(selectedDate) && d.id !== uniqueRecordId) {
             await deleteDoc(doc(db, 'attendance_records', d.id));
           }
         }
 
-        // Delete matching points log entry for this activity and date
         const qPts = query(
           collection(db, 'points_log'),
           where('deaconId', '==', deacon.id)
         );
         const ptsSnap = await getDocs(qPts);
-        let deletedPointsCount = 0;
         for (const d of ptsSnap.docs) {
           const data = d.data();
           const matchesActivity = (data.activityTypeId === activeActivity.id) || 
             (data.reason && data.reason.includes(activeActivity.name));
           const matchesDate = (data.date && data.date.startsWith(selectedDate));
-          if (matchesActivity && matchesDate) {
-            deletedPointsCount += (data.points || 0);
+          if (matchesActivity && matchesDate && d.id !== uniquePointsId) {
             await deleteDoc(doc(db, 'points_log', d.id));
           }
-        }
-
-        // Fallback: If no exact matching points log was found, add a deduction record to balance
-        if (deletedPointsCount === 0 && (activeActivity.defaultPoints || 0) > 0) {
-          await addDoc(collection(db, 'points_log'), {
-            deaconId: deacon.id,
-            activityTypeId: activeActivity.id,
-            reason: `خصم لإلغاء حضور: ${activeActivity.name}`,
-            points: -(activeActivity.defaultPoints || 0),
-            date: new Date().toISOString(),
-            addedBy: userData?.id,
-            monthKey: selectedDate.slice(0, 7)
-          });
         }
 
         setRecordedMap(prev => {
@@ -187,7 +185,7 @@ export const FastAttendance = () => {
       console.error(err);
       alert('حدث خطأ أثناء تعديل الحضور: ' + err.message);
     } finally {
-      setLoading(false);
+      setDeaconLoading(prev => ({ ...prev, [deacon.id]: false }));
     }
   };
 
@@ -207,7 +205,8 @@ export const FastAttendance = () => {
       const monthKey = selectedDate.slice(0, 7);
 
       for (const d of unrecorded) {
-        await addDoc(collection(db, 'attendance_records'), {
+        const uniqueRecordId = `${d.id}_${activeActivity.id}_${selectedDate}`;
+        await setDoc(doc(db, 'attendance_records', uniqueRecordId), {
           deaconId: d.id,
           activityTypeId: activeActivity.id,
           activityName: activeActivity.name,
@@ -218,8 +217,10 @@ export const FastAttendance = () => {
           timestamp: new Date().toISOString()
         });
 
-        await addDoc(collection(db, 'points_log'), {
+        const uniquePointsId = `att_pt_${d.id}_${activeActivity.id}_${selectedDate}`;
+        await setDoc(doc(db, 'points_log', uniquePointsId), {
           deaconId: d.id,
+          activityTypeId: activeActivity.id,
           reason: `حضور جماعي: ${activeActivity.name}`,
           points: activeActivity.defaultPoints || 0,
           date: recordDate,
@@ -403,7 +404,11 @@ export const FastAttendance = () => {
               </div>
 
               <div className="shrink-0">
-                {isPresent ? (
+                {deaconLoading[deacon.id] ? (
+                  <div className="w-8 h-8 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-300">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </div>
+                ) : isPresent ? (
                   <div className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
                     <CheckCircle2 className="w-5 h-5" />
                   </div>

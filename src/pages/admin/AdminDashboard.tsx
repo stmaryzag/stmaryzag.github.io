@@ -132,6 +132,14 @@ export const AdminDashboard = () => {
       path: '/admin/attendance'
     },
     {
+      title: 'التقارير والإحصائيات الشاملة',
+      desc: 'تقارير مفصلة لكل نشاط أو لكل شماس مع المنحنيات البيانية',
+      icon: Activity,
+      color: 'bg-indigo-600',
+      badge: 'جديد',
+      path: '/admin/reports'
+    },
+    {
       title: 'الاشتراكات الشهرية (30 ج)',
       desc: 'متابعة وتسجيل دفع 30 جنيه شهرياً لكل شماس',
       icon: CreditCard,

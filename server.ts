@@ -1,19 +1,49 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import helmet from 'helmet';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 
 const ONESIGNAL_APP_ID = '779cfd74-9eb2-4c11-94a2-495b0e084014';
-const ONESIGNAL_REST_API_KEY = process.env.VITE_ONESIGNAL_REST_API_KEY || ['os_v2_app', 'o6op25e6wjgbdffcjfnq4ccacq4qhmqaelpepqvppgx4stsxqthanxrkdxcsgixs3m27wbds7lzcodhxrkrbo4bbe4lpqkajjur7uqa'].join('_');
+const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY || ['os_v2_app', 'o6op25e6wjgbdffcjfnq4ccacq4qhmqaelpepqvppgx4stsxqthanxrkdxcsgixs3m27wbds7lzcodhxrkrbo4bbe4lpqkajjur7uqa'].join('_');
+const FIREBASE_API_KEY = "AIzaSyC-eTvrgJ6TkNyQ4GcMEEK-4VjAZtbRej4"; // Used for token verification
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(helmet({
+    contentSecurityPolicy: false // Required so Vite HMR and inline scripts can run
+  }));
+  app.use(cors());
   app.use(express.json());
 
+  const pushLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 20, // limit each IP to 20 requests per windowMs
+    message: { success: false, error: 'Too many push requests' }
+  });
+
   // Server-side route to proxy push notifications to OneSignal (bypasses CORS completely)
-  app.post('/api/onesignal/push', async (req, res) => {
+  app.post('/api/onesignal/push', pushLimiter, async (req, res) => {
     try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: No token provided' });
+      }
+      
+      const token = authHeader.split('Bearer ')[1];
+      const verifyRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: token })
+      });
+      
+      if (!verifyRes.ok) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Invalid token' });
+      }
+
       const { title, body, externalUserIds, includedSegments, filters, url, data } = req.body;
 
       const payload: Record<string, any> = {
