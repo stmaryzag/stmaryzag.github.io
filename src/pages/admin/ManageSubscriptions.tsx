@@ -105,7 +105,7 @@ export const ManageSubscriptions = () => {
   // Toggle or Record Payment of 30 EGP + Award configured points
   const togglePayment = async (deacon: UserData) => {
     if (!deacon?.id) return;
-    const isPaid = !subscriptions[deacon.id]?.paid;
+    const isCurrentlyPaid = !!subscriptions[deacon.id]?.paid;
     const subDocId = `${deacon.id}_${currentMonthKey}`;
     const subPointsDocId = `sub_points_${deacon.id}_${currentMonthKey}`;
     setActionLoading(deacon.id);
@@ -118,7 +118,7 @@ export const ManageSubscriptions = () => {
       const recorderName = userData?.fullName || 'المسؤول';
       const monthNameAr = MONTH_NAMES_AR[selectedMonth - 1] || `شهر ${selectedMonth}`;
 
-      if (isPaid) {
+      if (isCurrentlyPaid) {
         // Mark as unpaid / update
         await setDoc(doc(db, 'subscriptions', subDocId), {
           deaconId: deacon.id,
