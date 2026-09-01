@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { SubscriptionRecord } from '../../types';
 import { subscribeSystemSettings } from '../../utils/systemSettings';
 import { sendSubscriptionNotification } from '../../utils/notificationHelper';
+import { awardAfteqadPointsOnAttendance, revertAfteqadPointsOnAttendanceCancel } from '../../utils/afetqadHelper';
 
 export const AssistantDashboard = () => {
   const { userData } = useAuth();
@@ -136,8 +137,15 @@ export const AssistantDashboard = () => {
           monthKey: currentMonthKey
         });
 
+        // Award Afteqad points to deacons who contacted this attendee
+        const rewarded = await awardAfteqadPointsOnAttendance(deacon.id, deacon.fullName, todayDateStr, userData?.id);
+
         setAttendanceMap(prev => ({ ...prev, [deacon.id]: true }));
-        setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${points} نقطة) ✅`);
+        if (rewarded.length > 0) {
+          setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${points} نقطة) ومكافأة ${rewarded.length} شماس قاموا بافتقاده ✨`);
+        } else {
+          setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${points} نقطة) ✅`);
+        }
       } else {
         // Cancel attendance: Delete attendance record & remove points log
         const qAtt = query(
@@ -152,6 +160,9 @@ export const AssistantDashboard = () => {
             await deleteDoc(doc(db, 'attendance_records', d.id));
           }
         }
+
+        // Revert any Afteqad points awarded to callers
+        await revertAfteqadPointsOnAttendanceCancel(deacon.id, todayDateStr);
 
         // Delete points log
         const qPts = query(
@@ -190,7 +201,7 @@ export const AssistantDashboard = () => {
         setSuccessMsg(`تم إلغاء حضور ${deacon.fullName} وخصم النقاط بنجاح (-${points} نقطة)`);
       }
 
-      setTimeout(() => setSuccessMsg(''), 2500);
+      setTimeout(() => setSuccessMsg(''), 3000);
     } catch (error: any) {
       console.error(error);
       alert('حدث خطأ أثناء تعديل الحضور: ' + error.message);

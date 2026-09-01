@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { 
   collection, query, getDocs, addDoc, where, orderBy, doc, getDoc, 
-  updateDoc, deleteDoc, writeBatch 
+  updateDoc, deleteDoc, writeBatch, limit 
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
   Phone, Home, Loader2, Users, CheckCircle2, RefreshCcw, 
   UserX, ShieldAlert, Sparkles, Filter, Search, Check, Clock,
-  ArrowRight, PhoneCall, AlertTriangle, Save, Settings
+  ArrowRight, PhoneCall, AlertTriangle, Save, Settings, Calendar,
+  Download, Award
 } from 'lucide-react';
 import { UserData } from '../../types';
 import { subscribeSystemSettings, updateSystemSettings } from '../../utils/systemSettings';
+import { getLiturgicalWeekKey, getLiturgicalWeekRange } from '../../utils/afetqadHelper';
 
 export const ManageAfetqad = () => {
   const { userData } = useAuth();
@@ -22,6 +24,8 @@ export const ManageAfetqad = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [deacons, setDeacons] = useState<UserData[]>([]);
+  const [activeWeekKey, setActiveWeekKey] = useState<string>(() => getLiturgicalWeekKey());
+  const [loadingAbsentees, setLoadingAbsentees] = useState(false);
   
   // Afteqad Points Configuration
   const [afteqadCallPoints, setAfteqadCallPoints] = useState<number>(50);
@@ -41,15 +45,7 @@ export const ManageAfetqad = () => {
   const [visitNotes, setVisitNotes] = useState('');
   const [savingVisit, setSavingVisit] = useState(false);
 
-  const getWeekKey = () => {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1); 
-    const monday = new Date(now.setDate(diff));
-    return monday.toISOString().slice(0, 10);
-  };
-
-  const currentWeekKey = getWeekKey();
+  const currentWeekKey = getLiturgicalWeekKey();
 
   useEffect(() => {
     fetchInitialData();
@@ -106,9 +102,27 @@ export const ManageAfetqad = () => {
   };
 
   const fetchWeeklyAssignments = async (deaconsList = deacons) => {
-    const q = query(collection(db, 'afetqad_assignments'), where('weekKey', '==', currentWeekKey));
-    const snap = await getDocs(q);
+    // 1. Try fetching current week's assignments
+    let effectiveWeekKey = currentWeekKey;
+    let q = query(collection(db, 'afetqad_assignments'), where('weekKey', '==', currentWeekKey));
+    let snap = await getDocs(q);
     
+    // 2. If current week has no assignments yet, fallback to the latest available distribution so assignments never disappear
+    if (snap.empty) {
+      const qLatest = query(collection(db, 'afetqad_assignments'), orderBy('createdAt', 'desc'), limit(150));
+      const latestSnap = await getDocs(qLatest);
+      if (!latestSnap.empty) {
+        const foundWeekKey = latestSnap.docs[0].data().weekKey;
+        if (foundWeekKey) {
+          effectiveWeekKey = foundWeekKey;
+          q = query(collection(db, 'afetqad_assignments'), where('weekKey', '==', foundWeekKey));
+          snap = await getDocs(q);
+        }
+      }
+    }
+
+    setActiveWeekKey(effectiveWeekKey);
+
     const deaconsMap = new Map<string, UserData>(deaconsList.map(d => [d.id, d]));
 
     const data: any[] = snap.docs.map(d => {
@@ -136,6 +150,51 @@ export const ManageAfetqad = () => {
     });
     if (priorityTargets.size > 0 && absentIds.length === 0) {
       setAbsentIds(Array.from(priorityTargets));
+    }
+  };
+
+  // Helper to automatically import absent deacons from the latest recorded attendance
+  const handleAutoImportAbsentees = async () => {
+    if (deacons.length === 0) return;
+    setLoadingAbsentees(true);
+    try {
+      // Find the most recent attendance records
+      const qAtt = query(collection(db, 'attendance_records'), orderBy('date', 'desc'), limit(200));
+      const snap = await getDocs(qAtt);
+      
+      if (snap.empty) {
+        alert('لم يتم العثور على سجلات حضور سابقة للاستيراد منها.');
+        return;
+      }
+
+      // Find the latest recorded date
+      const latestDate = snap.docs[0].data().date?.slice(0, 10);
+      if (!latestDate) {
+        alert('لم يتم العثور على تاريخ مسجل.');
+        return;
+      }
+
+      // Collect all deacons who attended on that latest date
+      const attendedDeaconIds = new Set<string>();
+      snap.docs.forEach(d => {
+        const data = d.data();
+        if (data.date && data.date.startsWith(latestDate) && data.deaconId) {
+          attendedDeaconIds.add(data.deaconId);
+        }
+      });
+
+      // Absent = all deacons minus attended
+      const computedAbsents = deacons
+        .filter(d => !attendedDeaconIds.has(d.id))
+        .map(d => d.id);
+
+      setAbsentIds(computedAbsents);
+      alert(`تم استيراد ${computedAbsents.length} غائب تلقائياً استناداً إلى آخر قداس/نشاط مسجل بتاريخ (${latestDate}).`);
+    } catch (err: any) {
+      console.error(err);
+      alert('تعذر استيراد الغائبين: ' + err.message);
+    } finally {
+      setLoadingAbsentees(false);
     }
   };
 
@@ -393,12 +452,13 @@ export const ManageAfetqad = () => {
                 </span>
                 <span className="inline-flex items-center gap-1 px-3 py-0.5 bg-yellow-400/20 text-yellow-100 text-xs font-bold rounded-full border border-yellow-300/30">
                   <Sparkles className="w-3.5 h-3.5" />
-                  مكافأة الاتصال: +{afteqadCallPoints} نقطة / اتصال
+                  مكافأة نجاح الافتقاد: +{afteqadCallPoints} نقطة عند الحضور
                 </span>
               </div>
               <h2 className="text-xl md:text-2xl font-black">توزيع ومتابعة افتقاد الشمامسة</h2>
-              <p className="text-xs text-orange-100/80 mt-0.5">
-                توزيع عادل ودقيق: 3 أسماء لكل شماس • الغائب يحظى بـ 6 متصلين • الحاضر بـ 3 متصلين • نقاط تشجيعية لكل اتصال ناجح
+              <p className="text-xs text-orange-100/90 mt-1 font-medium flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5" />
+                <span>{getLiturgicalWeekRange(activeWeekKey)}</span>
               </p>
             </div>
           </div>
@@ -434,17 +494,17 @@ export const ManageAfetqad = () => {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="flex items-start sm:items-center gap-3">
               <div className="p-3 bg-amber-500 text-white rounded-2xl shadow-sm shrink-0">
-                <Sparkles className="w-6 h-6" />
+                <Award className="w-6 h-6" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="font-extrabold text-slate-800 text-sm">مكافأة نقاط اتصال الافتقاد</h3>
+                  <h3 className="font-extrabold text-slate-800 text-sm">مكافأة نقاط نجاح الافتقاد</h3>
                   <span className="px-2 py-0.5 bg-orange-100 text-orange-800 text-[11px] font-bold rounded-full">
-                    الحالي: {afteqadCallPoints} نقطة لكل اتصال
+                    الحالي: {afteqadCallPoints} نقطة لكل اتصال ناجح
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
-                  تُضاف هذه النقاط تلقائياً لرصيد الشماس عند الضغط على "تم الاتصال والاطمئنان" على أي من الـ 3 شمامسة المسندين له.
+                  عندما يحدد الشماس المهمة كـ "منجز"، ينتظر النظام قداس الجمعة التالي، وإذا حضر الشماس المُفتقَد تُضاف النقاط آلياً للشماس المتصل تشجيعاً لثمر الافتقاد.
                 </p>
               </div>
             </div>
@@ -521,23 +581,36 @@ export const ManageAfetqad = () => {
                 </p>
               </div>
 
-              <button 
-                onClick={runAlgorithm}
-                disabled={loadingAlgorithm}
-                className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-slate-900/20 transition-all disabled:opacity-50"
-              >
-                {loadingAlgorithm ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
-                    جاري تشغيل الخوارزمية وتوزيع الـ 3 أسماء...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCcw className="w-4 h-4 text-orange-400" />
-                    توليد وتوزيع الافتقاد لهذا الأسبوع
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <button
+                  type="button"
+                  onClick={handleAutoImportAbsentees}
+                  disabled={loadingAbsentees}
+                  className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-2xl font-bold text-xs flex items-center gap-1.5 transition-all disabled:opacity-50"
+                  title="استيراد الغائبين تلقائياً من آخر قداس مسجل"
+                >
+                  {loadingAbsentees ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  استيراد الغائبين من آخر قداس
+                </button>
+
+                <button 
+                  onClick={runAlgorithm}
+                  disabled={loadingAlgorithm}
+                  className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-slate-900/20 transition-all disabled:opacity-50"
+                >
+                  {loadingAlgorithm ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
+                      جاري تشغيل الخوارزمية وتوزيع الـ 3 أسماء...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCcw className="w-4 h-4 text-orange-400" />
+                      توليد وتوزيع الافتقاد لهذا الأسبوع
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Absent Toggle Grid */}
@@ -726,24 +799,36 @@ export const ManageAfetqad = () => {
                               </div>
                             </div>
 
-                            <button
-                              onClick={() => handleToggleTaskStatus(task.id, task.status)}
-                              className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all ${
-                                task.status === 'completed'
-                                  ? 'bg-emerald-600 text-white shadow-xs'
-                                  : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
-                              }`}
-                            >
-                              {task.status === 'completed' ? (
-                                <>
-                                  <CheckCircle2 className="w-3.5 h-3.5" /> تم الاتصال
-                                </>
-                              ) : (
-                                <>
-                                  <Clock className="w-3.5 h-3.5 text-amber-500" /> تعيين كمنجز
-                                </>
+                            <div className="flex items-center gap-2">
+                              {task.status === 'completed' && (
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg ${
+                                  task.pointsAwarded 
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                                    : 'bg-amber-100 text-amber-800 border border-amber-300'
+                                }`}>
+                                  {task.pointsAwarded ? '🎉 حضر وأضيفت النقاط' : '⏳ بانتظار حضور القداس'}
+                                </span>
                               )}
-                            </button>
+
+                              <button
+                                onClick={() => handleToggleTaskStatus(task.id, task.status)}
+                                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all ${
+                                  task.status === 'completed'
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
+                                }`}
+                              >
+                                {task.status === 'completed' ? (
+                                  <>
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> تم الاتصال
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clock className="w-3.5 h-3.5 text-amber-500" /> تعيين كمنجز
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>

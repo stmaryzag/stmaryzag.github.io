@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, onSnapshot, doc, getDoc, addDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
   Star, History, PlusCircle, Trophy, User, X, Loader2, Phone, 
   CheckCircle, CreditCard, Cake, Sparkles, Flame, Shield, Award, 
-  ChevronRight, Calendar, ArrowUpRight, CheckCircle2, AlertCircle, HeartHandshake
+  ChevronRight, Calendar, ArrowUpRight, CheckCircle2, AlertCircle, HeartHandshake,
+  Clock
 } from 'lucide-react';
 import clsx from 'clsx';
 import { SubscriptionRecord, UserLevel } from '../../types';
 import { calculateDeaconLevel, DEFAULT_LEVELS } from '../../utils/levels';
 import { subscribeSystemSettings } from '../../utils/systemSettings';
+import { getLiturgicalWeekKey, getLiturgicalWeekRange } from '../../utils/afetqadHelper';
 
 const MONTH_NAMES_AR = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -104,14 +106,8 @@ export const DeaconDashboard = () => {
       setActivities(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // Fetch Afetqad Assignments for the week
-    const getWeekKey = () => {
-      const d = new Date();
-      const day = d.getDay();
-      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-      const monday = new Date(d.setDate(diff));
-      return monday.toISOString().slice(0, 10);
-    };
+    // Fetch Afetqad Assignments for the liturgical week (Friday-to-Friday)
+    const currentWeekKey = getLiturgicalWeekKey();
 
     // Fetch Configured User Levels
     const unsubLevels = onSnapshot(collection(db, 'levels'), (snap) => {
@@ -124,11 +120,16 @@ export const DeaconDashboard = () => {
 
     const qAfetqad = query(
       collection(db, 'afetqad_assignments'), 
-      where('callerId', '==', userData.id),
-      where('weekKey', '==', getWeekKey())
+      where('callerId', '==', userData.id)
     );
     const unsubAfetqad = onSnapshot(qAfetqad, async (snapshot) => {
-      const tasks = await Promise.all(snapshot.docs.map(async d => {
+      let rawDocs = snapshot.docs;
+      // Filter for current liturgical week, or fallback to the latest week available
+      const currentWeekDocs = rawDocs.filter(d => d.data().weekKey === currentWeekKey);
+      const docsToUse = currentWeekDocs.length > 0 ? currentWeekDocs : rawDocs;
+
+      // Sort by priority and creation
+      const tasks = await Promise.all(docsToUse.map(async d => {
         const docData = d.data();
         const targetSnap = await getDoc(doc(db, 'users', docData.targetId));
         return {
@@ -178,11 +179,34 @@ export const DeaconDashboard = () => {
   const totalAllTimePoints = pointsLog
     .reduce((acc, curr) => acc + (curr.points || 0), 0);
 
-  // Compute Rank in Month and Top 3 status
-  const userRankIndex = allDeaconMonthScores.findIndex(s => s.id === userData?.id);
-  const userRankPosition = userRankIndex !== -1 ? userRankIndex + 1 : (allDeaconMonthScores.length + 1);
-  const isTopThree = userRankPosition <= 3;
-  const thirdPlaceScore = allDeaconMonthScores[2]?.points || 0;
+  // Compute Dense Rank in Month (الخيار ب) and Top 3 status with duplicate handling
+  const distinctMonthScores = useMemo<number[]>(() => {
+    const numbersList = allDeaconMonthScores.map(s => Number(s.points) || 0);
+    const uniqueNumbers = Array.from(new Set<number>(numbersList)).filter((p: number) => p > 0);
+    return uniqueNumbers.sort((a: number, b: number) => b - a);
+  }, [allDeaconMonthScores]);
+
+  const scoreCountsMap = useMemo(() => {
+    const counts: Record<number, number> = {};
+    allDeaconMonthScores.forEach(s => {
+      const p = Number(s.points) || 0;
+      counts[p] = (counts[p] || 0) + 1;
+    });
+    return counts;
+  }, [allDeaconMonthScores]);
+
+  const userRankPosition = currentMonthPoints > 0 
+    ? (distinctMonthScores.indexOf(currentMonthPoints) + 1)
+    : (distinctMonthScores.length + 1);
+
+  const isUserDuplicate = currentMonthPoints > 0 && (scoreCountsMap[currentMonthPoints] || 0) > 1;
+  const isTopThree = userRankPosition <= 3 && currentMonthPoints > 0;
+  
+  // 3rd place score (the 3rd distinct highest score, or the lowest active score if less than 3)
+  const thirdPlaceScore = distinctMonthScores.length >= 3 
+    ? distinctMonthScores[2] 
+    : (distinctMonthScores[distinctMonthScores.length - 1] || 0);
+
   const pointsToTopThree = Math.max(1, (thirdPlaceScore - currentMonthPoints) + 1);
 
   // Dynamic Level & Rank calculations for Gamification
@@ -216,26 +240,19 @@ export const DeaconDashboard = () => {
   };
 
   const markAfetqadDone = async (taskId: string) => {
-    if(!window.confirm('هل قمت بالاتصال والاطمئنان على زميلك الشماس؟')) return;
+    if (!window.confirm('هل قمت بالاتصال والاطمئنان على زميلك الشماس؟\n(ملاحظة: ستُضاف نقاط المكافأة تلقائياً عند حضوره في قداس الجمعة القادم)')) return;
     try {
       await updateDoc(doc(db, 'afetqad_assignments', taskId), {
         status: 'completed',
-        completedAt: new Date().toISOString()
+        completedAt: new Date().toISOString(),
+        pointsAwarded: false
       });
       
-      await addDoc(collection(db, 'points_log'), {
-        deaconId: userData?.id,
-        reason: 'إتمام اتصال افتقاد واطمئنان أسبوعي',
-        points: afteqadCallPoints,
-        date: new Date().toISOString(),
-        addedBy: 'system',
-        monthKey: currentMonthKey
-      });
-      
-      setSuccessMsg(`بارك الله فيك! تم تسجيل الافتقاد وإضافة ${afteqadCallPoints} نقطة لمجموعك ✨`);
-      setTimeout(() => setSuccessMsg(''), 3000);
+      setSuccessMsg(`بارك الله فيك! تم تسجيل إتمام الافتقاد بنجاح ⏳ ستُضاف نقاط المكافأة (+${afteqadCallPoints} نقطة) تلقائياً عند حضور زميلك في قداس الجمعة القادم ✨`);
+      setTimeout(() => setSuccessMsg(''), 4000);
     } catch (error) {
       console.error(error);
+      alert('حدث خطأ أثناء حفظ الافتقاد.');
     }
   };
 
@@ -345,12 +362,12 @@ export const DeaconDashboard = () => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="bg-slate-950 text-amber-300 text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                  المركز #{userRankPosition} على مستوى الخورس
+                  المركز #{userRankPosition} {isUserDuplicate ? '(مكرر)' : ''} على مستوى الخورس
                 </span>
                 <span className="text-xs font-extrabold text-slate-900">شهر {currentMonthName}</span>
               </div>
               <h3 className="text-base sm:text-lg font-black mt-1 text-slate-950 leading-snug">
-                🎉 رائع جداً يا {userData?.fullName}! أنت حالياً من الثلاثة الأوائل في الخورس هذا الشهر! حافظ على تميزك وصدارتك! 🌟
+                🎉 رائع جداً يا {userData?.fullName}! أنت حالياً بالمركز #{userRankPosition} {isUserDuplicate ? '(مكرر)' : ''} ومن الثلاثة الأوائل في الخورس هذا الشهر! حافظ على تميزك وصدارتك! 🌟
               </h3>
             </div>
           </div>
@@ -367,7 +384,7 @@ export const DeaconDashboard = () => {
             <div>
               <p className="text-xs font-bold text-slate-400">موقعك في لوحة شرف شهر {currentMonthName}:</p>
               <h4 className="text-sm font-extrabold text-slate-200 mt-0.5">
-                أنت حالياً بالمركز <strong className="text-indigo-400 font-mono">#{userRankPosition}</strong> (لست من الثلاثة الأوائل بعد). باقي لك <strong className="text-amber-400 font-mono">{pointsToTopThree}</strong> نقطة لدخول الثلاثة الأوائل! 💪
+                أنت حالياً بالمركز <strong className="text-indigo-400 font-mono">#{userRankPosition} {isUserDuplicate ? '(مكرر)' : ''}</strong> (لست من الثلاثة الأوائل بعد). باقي لك <strong className="text-amber-400 font-mono">{pointsToTopThree}</strong> نقطة لدخول الثلاثة الأوائل! 💪
               </h4>
             </div>
           </div>
@@ -474,10 +491,13 @@ export const DeaconDashboard = () => {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <HeartHandshake className="w-5 h-5 text-orange-500" />
-              <h3 className="font-extrabold text-slate-800 text-sm">افتقاد واطمئنان أسبوعي</h3>
+              <div>
+                <h3 className="font-extrabold text-slate-800 text-sm">افتقاد واطمئنان أسبوعي</h3>
+                <span className="text-[10px] text-slate-400 font-medium">الجمعة إلى الجمعة</span>
+              </div>
             </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 bg-orange-50 text-orange-700 rounded-md border border-orange-200">
-              +{afteqadCallPoints} نقطة لكل اتصال
+            <span className="text-[10px] font-bold px-2.5 py-1 bg-amber-50 text-amber-800 rounded-xl border border-amber-200">
+              +{afteqadCallPoints} نقطة عند حضور القداس
             </span>
           </div>
 
@@ -485,7 +505,14 @@ export const DeaconDashboard = () => {
             {afetqadTasks.map(task => (
               <div key={task.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
                 <div>
-                  <p className="font-bold text-slate-800">{task.targetName}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="font-bold text-slate-800">{task.targetName}</p>
+                    {task.priority && (
+                      <span className="px-1.5 py-0.2 bg-rose-100 text-rose-700 rounded text-[9px] font-extrabold">
+                        غائب
+                      </span>
+                    )}
+                  </div>
                   {task.targetPhone && (
                     <a href={`tel:${task.targetPhone}`} className="text-blue-600 font-mono text-[11px] block mt-0.5">
                       📞 {task.targetPhone}
@@ -493,15 +520,21 @@ export const DeaconDashboard = () => {
                   )}
                 </div>
                 {task.status === 'completed' ? (
-                  <span className="text-emerald-700 font-bold text-[11px] bg-emerald-50 px-3 py-1 rounded-xl border border-emerald-200">
-                    ✅ تم الاطمئنان
-                  </span>
+                  task.pointsAwarded ? (
+                    <span className="text-emerald-700 font-bold text-[10px] bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> حضر القداس (+{task.awardedPoints || afteqadCallPoints} نقطة)
+                    </span>
+                  ) : (
+                    <span className="text-amber-800 font-bold text-[10px] bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200 flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-amber-600" /> تم الافتقاد • بانتظار حضور القداس
+                    </span>
+                  )
                 ) : (
                   <button 
                     onClick={() => markAfetqadDone(task.id)}
-                    className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-[11px] shadow-xs"
+                    className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold rounded-xl text-[11px] shadow-xs transition-all"
                   >
-                    تأكيد الاتصال
+                    تأكيد الاتصال والاطمئنان
                   </button>
                 )}
               </div>

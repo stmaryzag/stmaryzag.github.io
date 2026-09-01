@@ -4,6 +4,7 @@ import { db } from '../../lib/firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { CheckCircle2, UserCheck, Calendar, Filter, Search, CheckCheck, Loader2, Award } from 'lucide-react';
 import { UserData, ActivityType } from '../../types';
+import { awardAfteqadPointsOnAttendance, revertAfteqadPointsOnAttendanceCancel } from '../../utils/afetqadHelper';
 
 export const FastAttendance = () => {
   const { userData } = useAuth();
@@ -134,8 +135,15 @@ export const FastAttendance = () => {
           monthKey
         });
 
+        // Check and award Afteqad points to deacons who contacted this attendee
+        const rewarded = await awardAfteqadPointsOnAttendance(deacon.id, deacon.fullName, selectedDate, userData?.id);
+
         setRecordedMap(prev => ({ ...prev, [deacon.id]: true }));
-        setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${activeActivity.defaultPoints} نقطة)`);
+        if (rewarded.length > 0) {
+          setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${activeActivity.defaultPoints} نقطة) ومكافأة ${rewarded.length} خادم شماس قاموا بافتقاده ✨`);
+        } else {
+          setSuccessMsg(`تم تسجيل حضور ${deacon.fullName} (+${activeActivity.defaultPoints} نقطة)`);
+        }
       } else {
         // Unmark: Delete attendance record in Firestore and remove/deduct points
         const uniqueRecordId = `${deacon.id}_${activeActivity.id}_${selectedDate}`;
@@ -143,6 +151,9 @@ export const FastAttendance = () => {
         
         await deleteDoc(doc(db, 'attendance_records', uniqueRecordId)).catch(() => {});
         await deleteDoc(doc(db, 'points_log', uniquePointsId)).catch(() => {});
+        
+        // Revert any Afteqad points awarded to callers
+        await revertAfteqadPointsOnAttendanceCancel(deacon.id, selectedDate);
         
         // Also cleanup any old legacy records that might exist with random IDs to be safe
         const qAtt = query(
@@ -180,7 +191,7 @@ export const FastAttendance = () => {
         });
         setSuccessMsg(`تم إلغاء حضور ${deacon.fullName} وخصم النقاط بنجاح (-${activeActivity.defaultPoints} نقطة)`);
       }
-      setTimeout(() => setSuccessMsg(''), 2500);
+      setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err: any) {
       console.error(err);
       alert('حدث خطأ أثناء تعديل الحضور: ' + err.message);
@@ -227,6 +238,9 @@ export const FastAttendance = () => {
           addedBy: userData?.id,
           monthKey
         });
+
+        // Trigger Afteqad reward check
+        await awardAfteqadPointsOnAttendance(d.id, d.fullName, selectedDate, userData?.id);
       }
 
       const updated = { ...recordedMap };
